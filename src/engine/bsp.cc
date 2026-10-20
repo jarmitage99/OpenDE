@@ -443,7 +443,6 @@ namespace dx {
                     int splits = 0;
                     int front = 0;
                     int back = 0;
-                    int coplanar = 0;
                     int index = i - 1;
                     Poly* poly = nullptr;
                     do {
@@ -460,7 +459,6 @@ namespace dx {
                         Poly* other = list[static_cast<size_t>(j)];
                         switch (splitWithPlaneFast(*other, makePlane(poly->base, poly->normal), nullptr, nullptr)) {
                         case SplitCoplanar:
-                            coplanar++;
                             break;
                         case SplitFront:
                             front++;
@@ -1538,8 +1536,6 @@ namespace dx {
                 std::vector<Portal*> leafPortals;
                 std::vector<std::vector<UObject*>> leafLights;
                 int32_t zonePortalSurf = -1;
-                int numPortals = 0;
-                int numZonePortals = 0;
 
                 static constexpr int32_t ClipBackFlag = 0x40000000;
 
@@ -1580,7 +1576,6 @@ namespace dx {
                         leafPortals[static_cast<size_t>(frontLeaf)] = &portal;
                         leafPortals[static_cast<size_t>(backLeaf)] = &portal;
                         nodePortals[static_cast<size_t>(generatingNode)] = &portal;
-                        numPortals++;
                     }
                 }
 
@@ -1658,7 +1653,6 @@ namespace dx {
                         int32_t nextNode = model->nodes[static_cast<size_t>(iNode)].iPlane;
                         Poly nodePoly;
                         if ((model->surfs[static_cast<size_t>(surf)].polyFlags & PF_Portal) && nodeToFPoly(*model, iNode, nodePoly)) {
-                            numZonePortals++;
                             zonePortalSurf = surf;
                             filterThroughSubtree(0, iNode, originalNode, model->nodes[static_cast<size_t>(originalNode)].leaf[0], model->nodes[static_cast<size_t>(originalNode)].back, nodePoly, &Visibility::blockPortal, -1);
                         }

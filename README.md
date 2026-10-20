@@ -1,4 +1,4 @@
-# Deus Ex reimplementation
+# OpenDE
 
 An open-source reimplementation of the Deus Ex engine and UnrealEd. It runs
 the original game's UnrealScript bytecode from the shipped `.u` packages on a
@@ -53,13 +53,13 @@ Windows builds are cross-compiled with MinGW:
 ## Browser builds
 
 Requires Emscripten and WebGL 2. The game data given at configure time is
-packaged into `deusex.data`, without the Windows binaries:
+packaged into `index.data`, without the Windows binaries:
 
     $ emcmake cmake -S . -B build-web -DCMAKE_BUILD_TYPE=Release -DSKIP_UT=ON -DDEUSEX_GAME_DATA="$PWD/demo-data"
     $ cmake --build build-web --target deusex -j"$(nproc)"
     $ python3 -m http.server -d build-web/bin 8000
 
-Then open `http://localhost:8000/deusex.html`. The game data is LZ4 compressed
+Then open `http://localhost:8000/`. The game data is LZ4 compressed
 and cached in IndexedDB after the first download, together with settings
 and saved games.
 

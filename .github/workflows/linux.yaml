@@ -67,7 +67,7 @@ jobs:
       - name: Install dependencies
         run: |
           dnf install -y \
-            gcc gcc-c++ cmake ninja-build ccache pkg-config \
+            gcc gcc-c++ libstdc++-static cmake ninja-build ccache pkg-config \
             libX11-devel libXext-devel libXrandr-devel libXcursor-devel libXi-devel \
             libXScrnSaver-devel libxkbcommon-devel mesa-libGL-devel mesa-libEGL-devel \
             alsa-lib-devel pulseaudio-libs-devel wayland-devel wayland-protocols-devel \

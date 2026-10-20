@@ -53,7 +53,7 @@ if(EMSCRIPTEN)
     OpenGlDrv.int OpenGlDrv.ini SGLDrv.int SoftDrv.int WinDrv.int Window.int Setup.int Startup.int)
   list(TRANSFORM DX_WEB_EXCLUDE PREPEND "SHELL:--exclude-file */")
   target_compile_definitions(deusex PRIVATE DEUSEX_GAME_DATA="/game")
-  set_target_properties(deusex PROPERTIES SUFFIX ".html")
+  set_target_properties(deusex PROPERTIES OUTPUT_NAME "index" SUFFIX ".html")
   set(DX_WEB_SHELL ${CMAKE_SOURCE_DIR}/cmake/emscripten/shell.html)
   set_property(TARGET deusex APPEND PROPERTY LINK_DEPENDS ${DX_WEB_SHELL})
   target_link_options(deusex PRIVATE
