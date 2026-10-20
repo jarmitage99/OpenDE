@@ -6,6 +6,16 @@ new C++ engine built on SDL2 and OpenGL 3.3.
 
 The original game data is required and is not included.
 
+## Features
+
+- Runs natively on Linux, Windows, macOS and in the browser
+- Widescreen support with Hor+ field of view
+- imgui-based editor
+- Anisotropic filtering, trilinear filtering
+- MSAA and FXAA
+- Smooth lighting: bicubic filtering of lightmaps
+- Detail textures visible at longer distances
+
 ## Requirements
 
 Debian/Ubuntu with:
@@ -107,3 +117,14 @@ Unit tests that need the game data are tagged `[data]`. You can run the ones
 that dont need game data with:
 
     $ build/bin/unit-tests "~[data]"
+
+## Thanks
+
+This project would not be possible without the incredible work from these
+legends:
+
+- gildor
+- dpJudas
+- jmarshall
+- AnthraX
+- Marco888
