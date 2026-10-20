@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenDE Demo</title>
+<style>
+:root {
+  --background: #1a1a1a;
+  --panel: #555858;
+  --border: #969999;
+  --text: #d9d9d9;
+  --muted: #6e7672;
+  --accent: #58b3d7;
+}
+html, body {
+  margin: 0;
+  background: var(--background);
+  color: var(--text);
+  font-family: sans-serif;
+  font-size: 15px;
+}
+main {
+  width: 800px;
+  margin: 24px auto;
+}
+header h1 {
+  margin: 0;
+  font-size: 24px;
+}
+header p {
+  margin: 4px 0 16px;
+  color: var(--muted);
+}
+a {
+  color: var(--accent);
+}
+#screen {
+  position: relative;
+  width: 800px;
+  height: 600px;
+  background: #000;
+  border: 1px solid var(--border);
+}
+#canvas {
+  display: block;
+  outline: none;
+}
+#status {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 480px;
+  text-align: center;
+}
+#progress {
+  width: 100%;
+  margin-top: 12px;
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 12px 0;
+  color: var(--muted);
+}
+button {
+  padding: 6px 16px;
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+section {
+  padding: 4px 20px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+section h2 {
+  font-size: 17px;
+}
+</style>
+</head>
+<body>
+<main>
+<header>
+<h1>OpenDE</h1>
+<p>An open-source reimplementation of the Deus Ex engine</p>
+</header>
+<div id="screen">
+<canvas id="canvas" width="800" height="600" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
+<div id="status"><div id="message">Loading</div><progress id="progress" max="1" value="0"></progress></div>
+</div>
+<div class="toolbar">
+<span>Click the game window to capture the mouse.</span>
+<button id="fullscreen" disabled>Fullscreen</button>
+</div>
+<section>
+<h2>About</h2>
+<p>OpenDE runs UnrealScript bytecode from the shipped packages. This page is the same engine compiled to WebAssembly with Emscripten, using WebGL 2. It runs the shareware Deus Ex demo</p>
+<p>Report any issues on the repo: <a href="https://github.com/jarmitage99/OpenDE">github.com/jarmitage99/OpenDE</a></p>
+<h2>Controls</h2>
+<p>WASD to move, LMB to fire, RMB to use. F1 opens the inventory and ESC the main menu.</p>
+<p>Settings and saved games are kept in browser storage.</p>
+</section>
+</main>
+<script>
+var statusElement = document.getElementById("status");
+var messageElement = document.getElementById("message");
+var progressElement = document.getElementById("progress");
+var fullscreenButton = document.getElementById("fullscreen");
+var userRoot = "/home/web_user/.local/share";
+function persist() {
+    FS.syncfs(false, function (error) {
+        if (error) {
+            console.error("save sync failed", error);
+        }
+    });
+}
+var Module = {
+    canvas: document.getElementById("canvas"),
+    arguments: ["--width", "800", "--height", "600"],
+    preRun: [function () {
+        FS.mkdirTree(userRoot);
+        FS.mount(IDBFS, {}, userRoot);
+        addRunDependency("idbfs");
+        FS.syncfs(true, function (error) {
+            if (error) {
+                console.error("load sync failed", error);
+            }
+            removeRunDependency("idbfs");
+        });
+    }],
+    postRun: [function () {
+        fullscreenButton.disabled = false;
+        setInterval(persist, 10000);
+        window.addEventListener("pagehide", persist);
+        document.addEventListener("visibilitychange", function () {
+            if (document.visibilityState === "hidden") {
+                persist();
+            }
+        });
+    }],
+    setStatus: function (text) {
+        var match = text.match(/\((\d+(?:\.\d+)?)\/(\d+)\)/);
+        if (match) {
+            progressElement.value = parseInt(match[1], 10) / parseInt(match[2], 10);
+            messageElement.textContent = "Downloading game data " + Math.round(100 * progressElement.value) + "%";
+        } else if (text) {
+            messageElement.textContent = text;
+        } else {
+            statusElement.style.display = "none";
+        }
+    },
+    onAbort: function (reason) {
+        statusElement.style.display = "block";
+        messageElement.textContent = "Error: " + reason;
+    }
+};
+Module.canvas.addEventListener("click", function () {
+    Module.canvas.focus();
+});
+</script>
+{{{ SCRIPT }}}
+</body>
+</html>

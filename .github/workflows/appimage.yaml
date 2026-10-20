@@ -1,0 +1,75 @@
+name: AppImage
+on:
+  push: ~
+  pull_request:
+    branches: [master]
+  workflow_call:
+
+concurrency:
+  group: appimage-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: AppImage x86_64
+    runs-on: ubuntu-latest
+    container: debian:12
+    env:
+      APPIMAGE_EXTRACT_AND_RUN: "1"
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
+            libxss-dev libxkbcommon-dev libgl-dev libegl-dev libasound2-dev \
+            libpulse-dev libwayland-dev wayland-protocols libdecor-0-dev \
+            ca-certificates wget file
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          cmake -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DSKIP_QA=ON
+          -DSKIP_UT=ON
+
+      - name: Build
+        run: cmake --build build --parallel $(nproc)
+
+      - name: Create AppDir
+        run: |
+          mkdir -p AppDir/usr/bin
+          mkdir -p AppDir/usr/share/applications
+          mkdir -p AppDir/usr/share/icons/hicolor/64x64/apps
+          mkdir -p AppDir/usr/share/metainfo
+          cp build/bin/deusex build/bin/deused build/bin/ucc AppDir/usr/bin/
+          cp dist/io.github.jarmitage99.DeusEx.desktop AppDir/usr/share/applications/
+          cp dist/io.github.jarmitage99.DeusEx.metainfo.xml AppDir/usr/share/metainfo/
+          cp dist/io.github.jarmitage99.DeusEx.png AppDir/usr/share/icons/hicolor/64x64/apps/
+
+      - name: Build AppImage
+        run: |
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          chmod +x linuxdeploy-x86_64.AppImage
+
+          ./linuxdeploy-x86_64.AppImage \
+            --appdir AppDir \
+            --executable AppDir/usr/bin/deusex \
+            --executable AppDir/usr/bin/deused \
+            --executable AppDir/usr/bin/ucc \
+            --desktop-file AppDir/usr/share/applications/io.github.jarmitage99.DeusEx.desktop \
+            --icon-file AppDir/usr/share/icons/hicolor/64x64/apps/io.github.jarmitage99.DeusEx.png \
+            --output appimage
+
+          rm linuxdeploy-x86_64.AppImage
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deusex-appimage-x86_64
+          path: "*.AppImage"
+          if-no-files-found: error

@@ -1,0 +1,28 @@
+app-id: io.github.jarmitage99.DeusEx
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+command: deusex
+finish-args:
+  - --share=ipc
+  - --socket=x11
+  - --socket=wayland
+  - --socket=pulseaudio
+  - --device=dri
+  - --filesystem=home:ro
+
+modules:
+  - name: deusex
+    buildsystem: simple
+    sources:
+      - type: dir
+        path: ..
+    build-commands:
+      - cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSKIP_QA=ON -DSKIP_UT=ON
+      - cmake --build build --parallel ${FLATPAK_BUILDER_N_JOBS}
+      - install -Dm755 build/bin/deusex /app/bin/deusex
+      - install -Dm755 build/bin/deused /app/bin/deused
+      - install -Dm755 build/bin/ucc /app/bin/ucc
+      - install -Dm644 dist/io.github.jarmitage99.DeusEx.desktop /app/share/applications/io.github.jarmitage99.DeusEx.desktop
+      - install -Dm644 dist/io.github.jarmitage99.DeusEx.metainfo.xml /app/share/metainfo/io.github.jarmitage99.DeusEx.metainfo.xml
+      - install -Dm644 dist/io.github.jarmitage99.DeusEx.png /app/share/icons/hicolor/64x64/apps/io.github.jarmitage99.DeusEx.png

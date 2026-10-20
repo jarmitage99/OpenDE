@@ -1,0 +1,35 @@
+name: Flatpak
+on:
+  push: ~
+  pull_request:
+    branches: [master]
+  workflow_call:
+
+concurrency:
+  group: flatpak-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Flatpak x86_64
+    runs-on: ubuntu-latest
+    container:
+      image: bilelmoussaoui/flatpak-github-actions:freedesktop-24.08
+      options: --privileged
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Flatpak
+        uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          manifest-path: dist/io.github.jarmitage99.DeusEx.yml
+          bundle: DeusEx.flatpak
+          upload-artifact: false
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deusex-flatpak-x86_64
+          path: DeusEx.flatpak
+          if-no-files-found: error

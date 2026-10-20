@@ -1,0 +1,82 @@
+name: Windows
+on:
+  push: ~
+  pull_request:
+    branches: [master]
+  workflow_call:
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mingw:
+    name: Windows (MinGW)
+    runs-on: ubuntu-latest
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build ccache mingw-w64
+
+      - name: Setup ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: mingw-ccache-${{ github.sha }}
+          restore-keys: mingw-ccache-
+
+      - name: Configure
+        run: >
+          cmake -B build-mingw -G Ninja
+          -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-toolchain.cmake
+          -DCMAKE_BUILD_TYPE=Release
+          -DSKIP_QA=ON
+
+      - name: Build
+        run: cmake --build build-mingw --parallel $(nproc)
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp build-mingw/bin/deusex.exe build-mingw/bin/deused.exe build-mingw/bin/ucc.exe dist/
+          ls -lh dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deusex-windows-mingw
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Upload unit tests
+        uses: actions/upload-artifact@v4
+        with:
+          name: deusex-windows-unit-tests
+          path: build-mingw/bin/unit-tests.exe
+          if-no-files-found: error
+
+  unit-tests:
+    name: Unit tests
+    needs: mingw
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download unit tests
+        uses: actions/download-artifact@v4
+        with:
+          name: deusex-windows-unit-tests
+
+      - name: Unit tests
+        shell: pwsh
+        run: |
+          ./unit-tests.exe "~[data]"
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }

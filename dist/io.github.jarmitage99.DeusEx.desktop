@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Deus Ex
+Comment=Open-source reimplementation of the Deus Ex engine
+Exec=deusex
+Icon=io.github.jarmitage99.DeusEx
+Categories=Game;ActionGame;

@@ -1,0 +1,106 @@
+name: Linux
+on:
+  push: ~
+  pull_request:
+    branches: [master]
+  workflow_call:
+
+concurrency:
+  group: linux-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ubuntu:
+    name: Linux (Ubuntu)
+    runs-on: ubuntu-latest
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build ccache pkg-config \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
+            libxss-dev libxkbcommon-dev libgl-dev libegl-dev libasound2-dev \
+            libpulse-dev libwayland-dev wayland-protocols libdecor-0-dev
+
+      - name: Setup ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ubuntu-ccache-${{ github.sha }}
+          restore-keys: ubuntu-ccache-
+
+      - name: Configure
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSKIP_QA=ON
+
+      - name: Build
+        run: cmake --build build --parallel $(nproc)
+
+      - name: Unit tests
+        run: build/bin/unit-tests "~[data]"
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp build/bin/deusex build/bin/deused build/bin/ucc dist/
+          ls -lh dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deusex-linux-ubuntu
+          path: dist/*
+          if-no-files-found: error
+
+  fedora:
+    name: Linux (Fedora)
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+    steps:
+      - name: Install dependencies
+        run: |
+          dnf install -y \
+            gcc gcc-c++ cmake ninja-build ccache pkg-config \
+            libX11-devel libXext-devel libXrandr-devel libXcursor-devel libXi-devel \
+            libXScrnSaver-devel libxkbcommon-devel mesa-libGL-devel mesa-libEGL-devel \
+            alsa-lib-devel pulseaudio-libs-devel wayland-devel wayland-protocols-devel \
+            libdecor-devel git tar gzip
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: fedora-ccache-${{ github.sha }}
+          restore-keys: fedora-ccache-
+
+      - name: Configure
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSKIP_QA=ON
+
+      - name: Build
+        run: cmake --build build --parallel $(nproc)
+
+      - name: Unit tests
+        run: build/bin/unit-tests "~[data]"
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp build/bin/deusex build/bin/deused build/bin/ucc dist/
+          ls -lh dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deusex-linux-fedora
+          path: dist/*
+          if-no-files-found: error

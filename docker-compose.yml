@@ -1,0 +1,41 @@
+services:
+  linux:
+    user: "${UID:-1000}:${GID:-1000}"
+    working_dir: /src
+    build: docker/linux
+    image: deusex-build-linux
+    volumes:
+      - .:/src
+      - ccache:/ccache
+    command:
+      - sh
+      - -euc
+      - |
+        cmake -S . -B build-docker -G Ninja -DCMAKE_BUILD_TYPE=Release -DSKIP_QA=ON
+        cmake --build build-docker --parallel
+
+  web:
+    user: "${UID:-1000}:${GID:-1000}"
+    working_dir: /src
+    build: docker/emscripten
+    image: deusex-build-web
+    volumes:
+      - .:/src
+      - type: bind
+        source: ${DEUSEX_GAME_DATA:-./demo-data}
+        target: /game-data
+        read_only: true
+        bind:
+          create_host_path: false
+      - ccache:/ccache
+      - emcache:/emcache
+    command:
+      - sh
+      - -euc
+      - |
+        emcmake cmake -S . -B build-web -G Ninja -DCMAKE_BUILD_TYPE=Release -DSKIP_QA=ON -DSKIP_UT=ON -DDEUSEX_GAME_DATA=/game-data
+        cmake --build build-web --target deusex --parallel
+
+volumes:
+  ccache:
+  emcache:

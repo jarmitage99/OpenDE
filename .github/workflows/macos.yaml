@@ -1,0 +1,52 @@
+name: macOS
+on:
+  push: ~
+  pull_request:
+    branches: [master]
+  workflow_call:
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: macOS (arm64)
+    runs-on: macos-latest
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: brew install cmake ninja ccache
+
+      - name: Setup ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: macos-ccache-${{ github.sha }}
+          restore-keys: macos-ccache-
+
+      - name: Configure
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSKIP_QA=ON
+
+      - name: Build
+        run: cmake --build build --parallel "$(sysctl -n hw.ncpu)"
+
+      - name: Unit tests
+        run: build/bin/unit-tests "~[data]"
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp build/bin/deusex build/bin/deused build/bin/ucc dist/
+          ls -lh dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deusex-macos-arm64
+          path: dist/*
+          if-no-files-found: error

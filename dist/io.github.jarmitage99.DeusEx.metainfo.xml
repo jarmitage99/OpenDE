@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.jarmitage99.DeusEx</id>
+  <name>Deus Ex</name>
+  <summary>Open-source reimplementation of the Deus Ex engine</summary>
+  <metadata_license>MIT</metadata_license>
+  <description>
+    <p>
+      An open-source reimplementation of the Deus Ex engine and of UnrealEd. It
+      runs the original game's UnrealScript bytecode from the shipped packages
+      on a new C++ engine built on SDL2 and OpenGL 3.3. The original game data
+      is required and is not included.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.jarmitage99.DeusEx.desktop</launchable>
+  <url type="homepage">https://github.com/jarmitage99/engine</url>
+  <url type="bugtracker">https://github.com/jarmitage99/engine/issues</url>
+  <provides>
+    <binary>deusex</binary>
+    <binary>deused</binary>
+  </provides>
+  <content_rating type="oars-1.1">
+    <content_attribute id="violence-realistic">intense</content_attribute>
+    <content_attribute id="violence-bloodshed">moderate</content_attribute>
+  </content_rating>
+</component>

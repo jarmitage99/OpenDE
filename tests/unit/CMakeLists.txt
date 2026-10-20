@@ -1,0 +1,6 @@
+file(GLOB UNIT_TEST_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/*.cc)
+add_executable(unit-tests ${UNIT_TEST_SOURCES})
+target_link_libraries(unit-tests PRIVATE dx-render dx-compiler Catch2)
+target_compile_definitions(unit-tests PRIVATE DEUSEX_GAME_DATA="${DEUSEX_GAME_DATA}" UCC_PATH="$<TARGET_FILE:ucc>")
+add_dependencies(unit-tests ucc)
+add_test(NAME unit-tests COMMAND unit-tests)
