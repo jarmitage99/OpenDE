@@ -38,6 +38,11 @@ namespace dx {
         uint8_t v = 0;
     };
 
+    struct MeshConnect {
+        int32_t numVertTriangles = 0;
+        int32_t triangleListOffset = 0;
+    };
+
     struct MeshMaterial {
         uint32_t polyFlags = 0;
         int32_t textureIndex = 0;
@@ -90,6 +95,7 @@ namespace dx {
         std::vector<AnimSequence> sequences;
         BoundingBox meshBounds;
         Plane meshSphere;
+        std::vector<MeshConnect> connects;
         std::vector<int32_t> vertLinks;
         std::vector<UObject*> textures;
         std::vector<BoundingBox> frameBounds;
@@ -101,6 +107,8 @@ namespace dx {
         Vector scale;
         Vector origin;
         Rotator rotOrigin;
+        int32_t curPoly = 0;
+        int32_t curVertex = 0;
         std::vector<float> textureLod;
     };
 

@@ -17,6 +17,7 @@ namespace dx {
         Linker(Name name, std::unique_ptr<Package> file);
 
         UObject* object(int32_t ref);
+        void rebind(int32_t ref, UObject* object);
         Name name(int32_t index) const;
         UObject* readObject(Reader& reader);
         Name readName(Reader& reader);
@@ -46,6 +47,7 @@ namespace dx {
         const std::filesystem::path& gameRoot();
         Linker* loadPackage(Name packageName);
         Linker* loadPackageFile(Name packageName, const std::filesystem::path& path, bool savedGame);
+        void setPackageFile(Name packageName, const std::filesystem::path& path);
         Linker* findLinker(Name packageName);
         void unloadPackage(Name packageName);
         UObject* packageObject(Name packageName);
@@ -62,6 +64,7 @@ namespace dx {
         UClass* findClass(std::string_view path);
         UClass* intrinsicClass(Name className);
         bool isIntrinsic(const UObject* object);
+        bool isIntrinsicClassName(std::string_view className);
         UObject* findObject(std::string_view path, UClass* cls);
         UObject* loadObject(std::string_view path, UClass* cls);
         UObject* newObject(UClass* cls, UObject* outer, Name objectName, uint32_t flags);

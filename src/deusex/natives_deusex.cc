@@ -924,9 +924,11 @@ namespace dx {
                     break;
                 }
             }
-            if (!s.missionList) {
-                objects::loadPackage(Name("DeusExConText"));
-                s.missionList = objects::findObject("DeusExConText.ConMissionList", nullptr);
+            std::string conversations = s.levelInfo ? deusexlevelinfo::ConversationPackage(s.levelInfo) : std::string();
+            std::string textPackage = conversations.empty() || iequals(conversations, "DeusExConversations") ? "DeusExConText" : conversations + "Text";
+            if (!s.missionList || !iequals(s.missionList->outermost()->name.str(), textPackage)) {
+                objects::loadPackage(Name(textPackage));
+                s.missionList = objects::findObject(textPackage + ".ConMissionList", nullptr);
                 objects::flushLoads();
             }
             if (!s.missionList || !s.levelInfo) {

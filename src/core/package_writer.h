@@ -49,6 +49,8 @@ namespace dx {
         void writeObject(Writer& writer, UObject* object);
         void writeName(Writer& writer, Name name);
         void writeTaggedProperties(Writer& writer, UStruct* structType, const uint8_t* data, const uint8_t* defaults, size_t defaultsSize = SIZE_MAX);
+        size_t beginLazyArray(Writer& writer);
+        void endLazyArray(Writer& writer, size_t skipAt);
         bool save(const std::filesystem::path& path, std::string* error);
 
     private:
@@ -57,6 +59,12 @@ namespace dx {
             Name className;
             int32_t outer = 0;
             Name name;
+        };
+
+        struct LazySkip {
+            const Writer* writer = nullptr;
+            size_t at = 0;
+            size_t end = 0;
         };
 
         struct ExportRecord {
@@ -78,5 +86,6 @@ namespace dx {
         ReferenceFilter filter;
         NativeSerializer nativeSerializer;
         FlagSelector flagSelector;
+        std::vector<LazySkip> lazySkips;
     };
 }

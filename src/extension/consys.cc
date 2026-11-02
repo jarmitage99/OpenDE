@@ -1,12 +1,14 @@
 #include "extension/windows.h"
 
 #include "core/objects.h"
+#include "engine/package.h"
 #include "engine/props_consys.h"
 #include "engine/props_deusex.h"
 #include "engine/props_engine.h"
 #include "engine/reader.h"
 #include "engine/resources.h"
 #include "engine/world.h"
+#include "extension/consys.h"
 
 #include <algorithm>
 #include <cctype>
@@ -16,32 +18,6 @@
 #include <unordered_map>
 
 namespace dx::extension {
-    class UConAudioList : public UObject {
-    public:
-        void serialize(Reader& reader, Linker& source) override
-        {
-            int32_t count = reader.index();
-            for (int32_t i = 0; i < count; i++) {
-                sounds.push_back(source.readObject(reader));
-            }
-        }
-
-        std::vector<UObject*> sounds;
-    };
-
-    class UConEventRandomLabel : public UObject {
-    public:
-        void serialize(Reader& reader, Linker&) override
-        {
-            int32_t count = reader.index();
-            for (int32_t i = 0; i < count; i++) {
-                labels.push_back(reader.string());
-            }
-        }
-
-        std::vector<std::string> labels;
-    };
-
     class UTextParser : public UObject {
     public:
         UObject* textObject = nullptr;
@@ -319,7 +295,11 @@ namespace dx::extension {
             if (audioPackage.empty()) {
                 return nullptr;
             }
-            Linker* linker = objects::loadPackage(Name("DeusExConAudio" + audioPackage));
+            std::string prefix = conversation->outermost()->name.str();
+            if (prefix.size() > 4 && iequals(std::string_view(prefix).substr(prefix.size() - 4), "Text")) {
+                prefix.resize(prefix.size() - 4);
+            }
+            Linker* linker = objects::loadPackage(Name(prefix + "Audio" + audioPackage));
             if (!linker) {
                 return nullptr;
             }

@@ -121,10 +121,10 @@ namespace dx {
         }
 
         skip = reader.u32();
-        size_t connects = readCount(reader);
-        for (size_t i = 0; i < connects; i++) {
-            reader.i32();
-            reader.u32();
+        connects.resize(readCount(reader));
+        for (MeshConnect& connect : connects) {
+            connect.numVertTriangles = reader.i32();
+            connect.triangleListOffset = reader.i32();
         }
         checkSkip(reader, skip);
 
@@ -161,8 +161,8 @@ namespace dx {
         rotOrigin.pitch = reader.i32();
         rotOrigin.yaw = reader.i32();
         rotOrigin.roll = reader.i32();
-        reader.u32();
-        reader.u32();
+        curPoly = reader.i32();
+        curVertex = reader.i32();
         textureLod.resize(readCount(reader));
         for (float& lod : textureLod) {
             lod = reader.f32();

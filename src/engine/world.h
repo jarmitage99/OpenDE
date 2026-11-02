@@ -103,6 +103,7 @@ namespace dx {
         DecalRegistry decals;
         uint64_t actorsVersion = 0;
         float timeSeconds = 0;
+        float pendingSeconds = 0;
         double realTime = 0;
         uint32_t frame = 0;
         std::string url;

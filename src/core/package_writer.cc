@@ -135,6 +135,36 @@ namespace dx {
 
     void Writer::string(const std::string& value)
     {
+        std::vector<uint16_t> units;
+        bool wide = false;
+        bool valid = true;
+        for (size_t i = 0; valid && i < value.size(); i++) {
+            uint8_t lead = static_cast<uint8_t>(value[i]);
+            size_t extra = lead < 0x80 ? 0 : ((lead & 0xe0) == 0xc0 ? 1 : ((lead & 0xf0) == 0xe0 ? 2 : 3));
+            if (extra > 2 || i + extra >= value.size()) {
+                valid = false;
+                break;
+            }
+            uint32_t unit = extra == 0 ? lead : (extra == 1 ? lead & 0x1fu : lead & 0x0fu);
+            for (size_t k = 1; k <= extra; k++) {
+                uint8_t next = static_cast<uint8_t>(value[i + k]);
+                if ((next & 0xc0) != 0x80) {
+                    valid = false;
+                }
+                unit = (unit << 6) | (next & 0x3fu);
+            }
+            i += extra;
+            wide = wide || unit > 0xff;
+            units.push_back(static_cast<uint16_t>(unit));
+        }
+        if (valid && wide) {
+            index(-static_cast<int32_t>(units.size() + 1));
+            for (uint16_t unit : units) {
+                i16(static_cast<int16_t>(unit));
+            }
+            i16(0);
+            return;
+        }
         size_t length = std::strlen(value.c_str());
         if (length == 0) {
             index(0);
@@ -228,6 +258,13 @@ namespace dx {
         if (filter && !filter(object)) {
             return 0;
         }
+        if (cast<UClass>(object) && object->outer && !object->outer->outer && object->outer->name == package) {
+            for (const ExportRecord& record : exports) {
+                if (!record.outer && record.object->name == object->name && cast<UClass>(record.object)) {
+                    return exportLookup[record.object];
+                }
+            }
+        }
         return importRef(object);
     }
 
@@ -240,13 +277,13 @@ namespace dx {
         ImportRecord record;
         record.name = object->name;
         if (!object->outer) {
-            if (!objects::findLinker(object->name) && !objects::loadPackage(object->name)) {
+            if (object->name != package && !objects::findLinker(object->name) && !objects::loadPackage(object->name)) {
                 return 0;
             }
             record.classPackage = Name("Core");
             record.className = Name("Package");
         } else {
-            if ((!object->linker && !cast<UClass>(object)) || !object->cls) {
+            if ((!object->linker && !cast<UClass>(object) && !objects::findLinker(object->outermost()->name)) || !object->cls) {
                 return 0;
             }
             int32_t outerRef = exportLookup.count(object->outer) ? 0 : importRef(object->outer);
@@ -417,6 +454,18 @@ namespace dx {
         writeName(writer, Name("None"));
     }
 
+    size_t PackageWriter::beginLazyArray(Writer& writer)
+    {
+        size_t at = writer.size();
+        writer.u32(0);
+        return at;
+    }
+
+    void PackageWriter::endLazyArray(Writer& writer, size_t skipAt)
+    {
+        lazySkips.push_back({ &writer, skipAt, writer.size() });
+    }
+
     void PackageWriter::writeExportData(Writer& writer, UObject* object, uint32_t& flags)
     {
         StateFrame* frame = object->stateFrame.get();
@@ -497,6 +546,15 @@ namespace dx {
                 offsets[i] = file.size();
                 file.bytes(bodies[i].data().data(), bodies[i].size());
             }
+
+            for (const LazySkip& skip : lazySkips) {
+                for (size_t i = 0; i < exports.size(); i++) {
+                    if (&bodies[i] == skip.writer) {
+                        file.patchU32(offsets[i] + skip.at, static_cast<uint32_t>(offsets[i] + skip.end));
+                    }
+                }
+            }
+            lazySkips.clear();
 
             size_t importOffset = file.size();
             for (const ImportRecord& record : imports) {

@@ -56,6 +56,18 @@ namespace dx {
             return result;
         }
 
+        const std::unordered_set<std::string>& engineIntrinsics()
+        {
+            static const std::unordered_set<std::string> names = { "primitive", "mesh", "lodmesh", "model", "polys", "level", "levelbase", "sound", "music", "palette", "font", "viewport", "client", "player", "netconnection", "netdriver", "engine", "renderbase", "renderdevice", "audiosubsystem", "eventmanager", "aieventtype", "aievent", "aisenderevent", "aireceiverevent" };
+            return names;
+        }
+
+        const std::unordered_set<std::string>& editorIntrinsics()
+        {
+            static const std::unordered_set<std::string> names = { "transbuffer" };
+            return names;
+        }
+
         const std::unordered_map<std::string, std::string>& intrinsicSupers()
         {
             static const std::unordered_map<std::string, std::string> supers = {
@@ -94,6 +106,14 @@ namespace dx {
                 { "aievent", "Object" },
                 { "aisenderevent", "AIEvent" },
                 { "aireceiverevent", "AIEvent" },
+                { "netconnection", "Player" },
+                { "netdriver", "Subsystem" },
+                { "audiosubsystem", "Subsystem" },
+                { "renderbase", "Subsystem" },
+                { "renderdevice", "Subsystem" },
+                { "mesh", "Primitive" },
+                { "model", "Primitive" },
+                { "level", "LevelBase" },
             };
             return supers;
         }
@@ -278,6 +298,11 @@ namespace dx {
         return 0;
     }
 
+    void Linker::rebind(int32_t ref, UObject* object)
+    {
+        exports.at(static_cast<size_t>(ref - 1)) = object;
+    }
+
     UObject* Linker::object(int32_t ref)
     {
         if (ref == 0) {
@@ -412,8 +437,10 @@ namespace dx {
             for (const char* folder : folders) {
                 directories.push_back(gameRoot / folder);
             }
-            std::filesystem::path userSystem = config::userDirectory() / "System";
-            directories.push_back(userSystem);
+            std::filesystem::path user = config::userDirectory();
+            for (const char* folder : { "System", "Textures", "Sounds", "Music" }) {
+                directories.push_back(user / folder);
+            }
             for (const std::filesystem::path& directory : directories) {
                 if (!std::filesystem::is_directory(directory)) {
                     continue;
@@ -426,7 +453,7 @@ namespace dx {
                             known = true;
                         }
                     }
-                    if (known && directory == userSystem) {
+                    if (known && directory.parent_path() == user) {
                         reg.paths[lower(item.path().stem().string())] = item.path();
                     } else if (known) {
                         reg.paths.emplace(lower(item.path().stem().string()), item.path());
@@ -503,6 +530,16 @@ namespace dx {
             reg.linkers.emplace(packageName, std::move(linker));
             result->packageObject = packageObject(packageName);
             return result;
+        }
+
+        void setPackageFile(Name packageName, const std::filesystem::path& path)
+        {
+            Registry& reg = registry();
+            if (path.empty()) {
+                reg.paths.erase(lower(packageName.str()));
+            } else {
+                reg.paths[lower(packageName.str())] = path;
+            }
         }
 
         Linker* loadPackageFile(Name packageName, const std::filesystem::path& path, bool savedGame)
@@ -733,6 +770,12 @@ namespace dx {
             return intrinsicClass(Name("Class"));
         }
 
+        bool isIntrinsicClassName(std::string_view className)
+        {
+            std::string key = lower(className);
+            return engineIntrinsics().count(key) || editorIntrinsics().count(key) || intrinsicSupers().count(key);
+        }
+
         bool isIntrinsic(const UObject* object)
         {
             auto it = registry().intrinsics.find(object->name);
@@ -755,9 +798,10 @@ namespace dx {
             cls->loaded = true;
             reg.intrinsics.emplace(className, cls);
             registerObject(cls);
-            static const std::unordered_set<std::string> engineIntrinsics = { "primitive", "mesh", "lodmesh", "model", "polys", "level", "levelbase", "sound", "music", "palette", "font", "viewport", "client", "player", "netconnection", "netdriver", "engine", "renderbase", "renderdevice", "audiosubsystem", "eventmanager", "aieventtype", "aievent", "aisenderevent", "aireceiverevent" };
-            if (engineIntrinsics.count(lower(className.str()))) {
+            if (engineIntrinsics().count(lower(className.str()))) {
                 cls->outer = packageObject(Name("Engine"));
+            } else if (editorIntrinsics().count(lower(className.str()))) {
+                cls->outer = packageObject(Name("Editor"));
             } else {
                 Linker* core = findLinker(Name("Core"));
                 cls->outer = core ? core->packageObject : nullptr;
@@ -766,6 +810,16 @@ namespace dx {
             UClass* parent = nullptr;
             if (super != intrinsicSupers().end()) {
                 parent = findClass(super->second);
+                Name parentName(super->second);
+                for (size_t i = 0; !parent && i < reg.table.size(); i++) {
+                    UClass* candidate = cast<UClass>(reg.table[i]);
+                    if (candidate && !candidate->destroyed && candidate->name == parentName && candidate->outer && !candidate->outer->outer) {
+                        parent = candidate;
+                    }
+                }
+                if (!parent && isIntrinsicClassName(super->second)) {
+                    parent = intrinsicClass(parentName);
+                }
             } else {
                 parent = objectClass();
             }
@@ -786,13 +840,19 @@ namespace dx {
                 std::string packageName = text.substr(0, text.find('.'));
                 Name className(text.substr(dot + 1));
                 Linker* linker = loadPackage(Name(packageName));
-                if (!linker) {
-                    return nullptr;
-                }
-                int32_t ref = linker->findExport(className, Name("Class"), "*");
+                int32_t ref = linker ? linker->findExport(className, Name("Class"), "*") : 0;
                 if (ref == 0) {
                     auto it = registry().intrinsics.find(className);
-                    return it != registry().intrinsics.end() ? it->second : nullptr;
+                    if (linker && it != registry().intrinsics.end()) {
+                        return it->second;
+                    }
+                    for (UObject* object : registry().table) {
+                        UClass* live = object && !object->destroyed && object->name == className ? cast<UClass>(object) : nullptr;
+                        if (live && live->outermost()->name == Name(packageName)) {
+                            return live;
+                        }
+                    }
+                    return nullptr;
                 }
                 UClass* cls = cast<UClass>(linker->object(ref));
                 ensureLoaded(cls);
@@ -817,13 +877,26 @@ namespace dx {
             return nullptr;
         }
 
+        static UObject* findLiveObject(const std::string& text, UClass* cls)
+        {
+            Name packageName(text.substr(0, text.find('.')));
+            Name objectName(text.substr(text.rfind('.') + 1));
+            for (UObject* object : registry().table) {
+                if (object && !object->destroyed && object->outer && object->name == objectName && object->outermost()->name == packageName && (!cls || object->isA(cls))) {
+                    return object;
+                }
+            }
+            return nullptr;
+        }
+
         UObject* findObject(std::string_view path, UClass* cls)
         {
             std::string text(path);
             size_t dot = text.find('.');
             if (dot == std::string::npos) {
+                Name name(text);
                 for (UObject* object : registry().table) {
-                    if (object && object->name == Name(text) && (!cls || object->isA(cls))) {
+                    if (object && object->name == name && (!cls || object->isA(cls))) {
                         return object;
                     }
                 }
@@ -831,7 +904,7 @@ namespace dx {
             }
             Linker* linker = findLinker(Name(text.substr(0, dot)));
             if (!linker) {
-                return nullptr;
+                return findLiveObject(text, cls);
             }
             size_t last = text.rfind('.');
             std::string group = last > dot ? text.substr(dot + 1, last - dot - 1) : std::string();
@@ -847,6 +920,18 @@ namespace dx {
             UObject* object = linker->object(ref);
             ensureLoaded(object);
             if (cls && !object->isA(cls) && !className.none()) {
+                const Package& file = linker->file();
+                for (size_t i = 0; i < file.exports().size(); i++) {
+                    int32_t other = static_cast<int32_t>(i + 1);
+                    if (Name(file.nameAt(file.exports()[i].name)) != objectName || !iequals(file.groupOf(other), group)) {
+                        continue;
+                    }
+                    UObject* candidate = linker->object(other);
+                    ensureLoaded(candidate);
+                    if (candidate && candidate->isA(cls)) {
+                        return candidate;
+                    }
+                }
                 return nullptr;
             }
             return object;

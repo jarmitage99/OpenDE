@@ -125,7 +125,20 @@ namespace dx::compiler {
         case PropType::Str:
         case PropType::String: {
             const std::string& text = *reinterpret_cast<const std::string*>(value);
-            return delimited ? "\"" + text + "\"" : text;
+            if (!delimited) {
+                return text;
+            }
+            std::string quoted = "\"";
+            for (char c : text) {
+                if (c == '\\') {
+                    quoted += "\\\\";
+                } else if (c == '"') {
+                    quoted += "\\22";
+                } else {
+                    quoted += c;
+                }
+            }
+            return quoted + "\"";
         }
         case PropType::Struct: {
             std::string text;

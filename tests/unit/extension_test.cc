@@ -286,6 +286,67 @@ TEST_CASE("Window background is drawn at its position scaled by the virtual reso
     CHECK(large.tiles[0].ul == 64.0f);
 }
 
+TEST_CASE("Full width window background covers an ultrawide screen while children stay in the 16:9 area", "[data]")
+{
+    dx::UObject* root = makeRoot();
+    dx::UObject* full = newChild(root, "Extension.Window");
+    {
+        dx::vm::Call call(full, dx::Name("SetWindowAlignments"));
+        call.byte(3).byte(3);
+        call.run();
+    }
+    dx::UObject* texture = dx::objects::loadObject("Engine.DefaultTexture", nullptr);
+    REQUIRE(dx::cast<dx::UTexture>(texture) != nullptr);
+    {
+        dx::vm::Call call(full, dx::Name("SetBackground"));
+        call.obj(texture);
+        call.run();
+    }
+    dx::UObject* child = newChild(full, "Extension.Window");
+    {
+        dx::vm::Call call(child, dx::Name("SetBackground"));
+        call.obj(texture);
+        call.run();
+    }
+    setPos(child, 10, 20);
+    setSize(child, 64, 32);
+
+    RecordingCanvas canvas(2520, 1080);
+    dx::extension::render(canvas);
+    REQUIRE(canvas.tiles.size() == 2);
+    CHECK(canvas.tiles[0].x == 0.0f);
+    CHECK(canvas.tiles[0].y == 0.0f);
+    CHECK(canvas.tiles[0].w == 2520.0f);
+    CHECK(canvas.tiles[0].h == 1080.0f);
+    CHECK(canvas.tiles[0].u == -150.0f);
+    CHECK(canvas.tiles[0].ul == 1260.0f);
+    CHECK(canvas.tiles[1].x == 320.0f);
+    CHECK(canvas.tiles[1].y == 40.0f);
+    CHECK(canvas.tiles[1].w == 128.0f);
+}
+
+TEST_CASE("The mouse beside the 16:9 area on an ultrawide screen is over a full width window", "[data]")
+{
+    dx::UObject* root = makeRoot();
+    dx::UObject* modal = newChild(root, "Extension.ModalWindow");
+    {
+        dx::vm::Call call(modal, dx::Name("SetWindowAlignments"));
+        call.byte(3).byte(3);
+        call.run();
+    }
+    dx::UObject* button = newChild(modal, "Extension.ButtonWindow");
+    {
+        dx::vm::Call call(button, dx::Name("SetWindowAlignments"));
+        call.byte(3).byte(3);
+        call.run();
+    }
+    layout(2520, 1080);
+    REQUIRE(dx::extension::wantsMouse());
+
+    dx::extension::mouseMove(100, 500);
+    CHECK(objectCall(root, "GetFocusWindow") == button);
+}
+
 TEST_CASE("Text window draws one glyph tile per character from the font texture", "[data]")
 {
     dx::UObject* root = makeRoot();
@@ -1287,4 +1348,79 @@ TEST_CASE("The modal mouse focus mode decides whether entering and leaving windo
     setMode(1);
     dx::extension::mouseMove(110, 110);
     CHECK(objectCall(root, "GetFocusWindow") == nullptr);
+}
+
+TEST_CASE("Conversation letterbox bars cover an ultrawide screen while the conversation stays in the 16:9 area", "[data]")
+{
+    dx::UObject* root = makeRoot("DeusEx.DeusExRootWindow");
+    voidCall(root, "DestroyAllChildren");
+    dx::extension::setViewportSize(1720, 720);
+    layout(1720, 720);
+    auto* conversation = static_cast<dx::extension::UWindow*>(newChild(root, "DeusEx.ConWindowActive"));
+    REQUIRE(conversation != nullptr);
+    {
+        dx::vm::Call call(conversation, dx::Name("SetWindowAlignments"));
+        call.byte(3).byte(3);
+        call.run();
+    }
+    *reinterpret_cast<float*>(conversation->propertyAddress(dx::Name("currentWindowPos"))) = 1.0f;
+    layout(1720, 720);
+    voidCall(conversation, "CalculateWindowSizes");
+    CHECK(conversation->width() == 1280.0f);
+
+    dx::UObject* texture = *reinterpret_cast<dx::UObject**>(conversation->propertyAddress(dx::Name("conTexture")));
+    REQUIRE(texture != nullptr);
+    RecordingCanvas canvas(1720, 720);
+    dx::extension::render(canvas);
+    int bars = 0;
+    for (const RecordedTile& tile : canvas.tiles) {
+        if (tile.texture == texture) {
+            CHECK(tile.x == 0.0f);
+            CHECK(tile.w == 1720.0f);
+            bars++;
+        }
+    }
+    CHECK(bars == 2);
+    dx::extension::setViewportSize(800, 600);
+}
+
+TEST_CASE("Scope view borders drawn by script cover an ultrawide screen around a centered scope", "[data]")
+{
+    initializeEngine();
+    dx::extension::reset();
+    dx::config::system().set("Engine.Engine", "Root", "DeusEx.DeusExRootWindow");
+    dx::objects::unloadPackage(dx::Name("01_NYC_UNATCOIsland"));
+    {
+        dx::World world;
+        REQUIRE(world.loadMap("01_NYC_UNATCOIsland"));
+        dx::UObject* root = dx::extension::rootWindow();
+        REQUIRE(root != nullptr);
+        REQUIRE(root->cls->name == dx::Name("DeusExRootWindow"));
+        dx::UObject* scope = *reinterpret_cast<dx::UObject**>(root->propertyAddress(dx::Name("scopeView")));
+        REQUIRE(scope != nullptr);
+        dx::extension::setViewportSize(2520, 1080);
+        layout(2520, 1080);
+        {
+            dx::vm::Call call(scope, dx::Name("ActivateView"));
+            call.i(30).b(false).b(true);
+            call.run();
+        }
+        RecordingCanvas canvas(2520, 1080);
+        dx::extension::render(canvas);
+        auto drawn = [&canvas](float x, float y, float w, float h) {
+            for (const RecordedTile& tile : canvas.tiles) {
+                if (tile.x == x && tile.y == y && tile.w == w && tile.h == h) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        CHECK(drawn(0, 0, 2520, 284));
+        CHECK(drawn(0, 796, 2520, 284));
+        CHECK(drawn(0, 284, 1004, 512));
+        CHECK(drawn(1516, 284, 1004, 512));
+        CHECK(drawn(1004, 284, 512, 512));
+        dx::extension::setViewportSize(800, 600);
+    }
+    dx::objects::unloadPackage(dx::Name("01_NYC_UNATCOIsland"));
 }

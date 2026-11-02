@@ -172,49 +172,7 @@ namespace dx::compiler::detail {
 
     void ScriptCompiler::execDirective(const std::string& command)
     {
-        std::string text = command;
-        auto next = [&]() {
-            size_t start = text.find_first_not_of(" \t");
-            if (start == std::string::npos) {
-                text.clear();
-                return std::string();
-            }
-            size_t end = text.find_first_of(" \t", start);
-            std::string word = text.substr(start, end == std::string::npos ? std::string::npos : end - start);
-            text = end == std::string::npos ? std::string() : text.substr(end);
-            return word;
-        };
-        std::string first = next();
-        std::string second = next();
-        if (iequals(first, "OBJ") && iequals(second, "LOAD")) {
-            size_t at = 0;
-            std::string upper = text;
-            for (char& c : upper) {
-                c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-            }
-            at = upper.find("FILE=");
-            if (at == std::string::npos) {
-                fail("OBJ LOAD: missing FILE=");
-            }
-            std::string file = text.substr(at + 5);
-            size_t end = file.find_first_of(" \t");
-            if (end != std::string::npos) {
-                file = file.substr(0, end);
-            }
-            std::replace(file.begin(), file.end(), '\\', '/');
-            std::string packageName = std::filesystem::path(file).stem().string();
-            Linker* linker = objects::loadPackage(Name(packageName));
-            if (!linker) {
-                context.log("Warning: OBJ LOAD could not load " + file);
-                return;
-            }
-            for (size_t i = 0; i < linker->file().exports().size(); i++) {
-                objects::ensureLoaded(linker->object(static_cast<int32_t>(i + 1)));
-            }
-            objects::flushLoads();
-            return;
-        }
-        context.log("Warning: unsupported #exec " + command);
+        context.pendingExecs.emplace_back(compiling, command);
     }
 
     bool ScriptCompiler::getVarType(UStruct* scope, PropertyBase& varProperty, uint32_t& objectFlags, uint32_t disallow, const char* thing)

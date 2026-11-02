@@ -1,5 +1,6 @@
 #include "compiler/script_package.h"
 
+#include "compiler/assets.h"
 #include "core/objects.h"
 #include "core/package_writer.h"
 
@@ -358,7 +359,33 @@ namespace dx::compiler {
                 out.string(text->text);
             } else if (UProperty* property = cast<UProperty>(object)) {
                 writeProperty(package, out, property);
+            } else {
+                serializeAsset(package, object, out);
             }
+        }
+
+        bool linkedToOwner(UObject* object)
+        {
+            UObject* outer = object->outer;
+            if (!outer || !outer->outer) {
+                return true;
+            }
+            if (outer->destroyed) {
+                return false;
+            }
+            UStruct* owner = cast<UStruct>(outer);
+            if (!owner) {
+                return linkedToOwner(outer);
+            }
+            if (cast<UTextBuffer>(object)) {
+                return owner->scriptText == object && linkedToOwner(owner);
+            }
+            for (UField* child = owner->children; child; child = child->next) {
+                if (child == object) {
+                    return linkedToOwner(owner);
+                }
+            }
+            return false;
         }
     }
 
@@ -372,17 +399,31 @@ namespace dx::compiler {
             if ((object->cls && object->cls->defaultObject == object) || objects::isIntrinsic(object)) {
                 continue;
             }
-            if (object->outermost() == package) {
+            if (object->outermost() == package && linkedToOwner(object)) {
                 contents.push_back(object);
             }
         }
         return contents;
     }
 
+    void discardStaleFields(UObject* package)
+    {
+        for (UObject* object : objects::all()) {
+            if (object && !object->destroyed && object != package && object->outermost() == package && !linkedToOwner(object)) {
+                object->destroyed = true;
+            }
+        }
+    }
+
     bool saveScriptPackage(UObject* package, const std::filesystem::path& path, std::string* error)
     {
+        return saveScriptPackage(package, packageContents(package), path, error);
+    }
+
+    bool saveScriptPackage(UObject* package, const std::vector<UObject*>& contents, const std::filesystem::path& path, std::string* error)
+    {
         PackageWriter writer(package->name);
-        for (UObject* object : packageContents(package)) {
+        for (UObject* object : contents) {
             writer.addExport(object, object->outer == package ? nullptr : object->outer);
         }
         writer.setNativeSerializer(serialize);

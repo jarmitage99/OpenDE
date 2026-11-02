@@ -89,7 +89,9 @@ uniform vec4 uLightPosition[8];
 uniform vec4 uLightColor[8];
 uniform vec4 uLightDirection[8];
 uniform int uSmoothLightmap;
-out vec4 fragColor;
+uniform float uOcclusion;
+layout(location = 0) out vec4 fragColor;
+layout(location = 1) out vec4 occlusionMask;
 vec4 lightmap()
 {
     if (uSmoothLightmap == 0)
@@ -153,6 +155,7 @@ void main()
         discard;
     }
 #endif
+    occlusionMask = vec4(uOcclusion);
     if ((uFlags & 32) != 0)
     {
         fragColor = vec4(mix(vColor.rgb, texture(uTexture, vUV).rgb, vColor.a), 1.0);
@@ -163,7 +166,7 @@ void main()
         fragColor = lightmap();
         return;
     }
-    vec4 color = vColor * uTint;
+    vec4 color = (uFlags & 128) != 0 ? vec4(uTint.rgb, vColor.a * uTint.a) : vColor * uTint;
     vec4 texel = vec4(1.0);
     if ((uFlags & 1) != 0)
     {
@@ -243,6 +246,147 @@ void main()
 }
 )";
 
+        const char* prepareFragmentSource = R"(#version 330 core
+uniform highp sampler2D uDepth;
+uniform highp sampler2D uMask;
+uniform vec3 uLinearize;
+uniform int uDivisor;
+out uint packedDepth;
+void main()
+{
+    ivec2 source = ivec2(gl_FragCoord.xy) * uDivisor;
+    float depth = uLinearize.x / (uLinearize.y - texelFetch(uDepth, source, 0).r * uLinearize.z);
+    uint mask = uint(texelFetch(uMask, source, 0).r * 255.0 + 0.5);
+    packedDepth = (uint(min(depth * 256.0, 16777215.0)) << 8) | mask;
+}
+)";
+
+        const char* occlusionFragmentSource = R"(
+uniform highp usampler2D uPacked;
+uniform vec4 uUnproject;
+out uint packedOcclusion;
+const float radius = 40.0;
+const mat2 turn = mat2(-0.7373689, 0.6754903, -0.6754903, -0.7373689);
+vec3 viewPosition(ivec2 pixel, uint value)
+{
+    float z = float(value >> 8) / 256.0;
+    return vec3((vec2(pixel) * uUnproject.xy + uUnproject.zw) * z, z);
+}
+vec3 neighbor(ivec2 pixel)
+{
+    return viewPosition(pixel, texelFetch(uPacked, pixel, 0).r);
+}
+void main()
+{
+    ivec2 size = textureSize(uPacked, 0);
+    ivec2 pixel = ivec2(gl_FragCoord.xy);
+    uint center = texelFetch(uPacked, pixel, 0).r;
+    uint receiver = center & 255u;
+    float reach = radius * 256.0 / (float(center >> 8) * uUnproject.y);
+    if (receiver < 3u || reach < 1.0)
+    {
+        packedOcclusion = 255u;
+        return;
+    }
+    vec3 position = viewPosition(pixel, center);
+    vec3 dx = pixel.x + 1 < size.x ? neighbor(pixel + ivec2(1, 0)) - position : vec3(0.0);
+    vec3 dy = pixel.y + 1 < size.y ? neighbor(pixel + ivec2(0, 1)) - position : vec3(0.0);
+    if (pixel.x > 0)
+    {
+        vec3 left = position - neighbor(pixel - ivec2(1, 0));
+        if (dx == vec3(0.0) || abs(left.z) < abs(dx.z))
+        {
+            dx = left;
+        }
+    }
+    if (pixel.y > 0)
+    {
+        vec3 down = position - neighbor(pixel - ivec2(0, 1));
+        if (dy == vec3(0.0) || abs(down.z) < abs(dy.z))
+        {
+            dy = down;
+        }
+    }
+    vec3 normal = normalize(cross(dx, dy));
+    if (dot(normal, position) > 0.0)
+    {
+        normal = -normal;
+    }
+    reach = min(reach, 0.15 * float(size.y)) / float(SAMPLES);
+    float angle = 6.2831853 * fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    vec2 direction = vec2(cos(angle), sin(angle));
+    float occlusion = 0.0;
+    float count = 0.0;
+    for (int i = 0; i < SAMPLES; i++)
+    {
+        ivec2 tap = pixel + ivec2(floor(direction * (reach * (float(i) + 0.5)) + 0.5));
+        direction = turn * direction;
+        ivec2 inside = clamp(tap, ivec2(0), size - 1);
+        float valid = tap == inside ? 1.0 : 0.0;
+        uint value = texelFetch(uPacked, inside, 0).r;
+        vec3 offset = viewPosition(inside, value) - position;
+        float distanceSquared = dot(offset, offset);
+        float cosine = (dot(offset, normal) - 2.0) * inversesqrt(distanceSquared + 0.0001);
+        occlusion += valid * max(cosine, 0.0) * max(1.0 - distanceSquared / (radius * radius), 0.0) * float(value & 255u);
+        count += valid;
+    }
+    float strength = receiver > 128u ? 0.5 : 1.0;
+    float visibility = 1.0 - occlusion * strength * 3.0 / (255.0 * max(count, 1.0));
+    packedOcclusion = (center & 0xFFFFFF00u) | uint(clamp(visibility, 0.0, 1.0) * 255.0 + 0.5);
+}
+)";
+
+        const char* blurFragmentSource = R"(
+uniform highp usampler2D uOcclusion;
+uniform ivec2 uDirection;
+#ifdef RESOLVE
+out vec4 fragColor;
+#else
+out uint packedOcclusion;
+#endif
+const float kernel[5] = float[5](1.0, 0.8824969, 0.6065307, 0.3246525, 0.1353353);
+void main()
+{
+    ivec2 pixel = ivec2(gl_FragCoord.xy);
+    ivec2 limit = textureSize(uOcclusion, 0) - 1;
+    uint center = texelFetch(uOcclusion, pixel, 0).r;
+    float depth = float(center >> 8);
+    float result = 255.0;
+    if (depth > 0.0)
+    {
+        float tolerance = 1.0 / (depth * 0.05);
+        float total = 0.0;
+        float weights = 0.0;
+        for (int i = -4; i <= 4; i++)
+        {
+            uint tap = texelFetch(uOcclusion, clamp(pixel + uDirection * i, ivec2(0), limit), 0).r;
+            float weight = kernel[abs(i)] * max(0.0, 1.0 - abs(float(tap >> 8) - depth) * tolerance);
+            total += float(tap & 255u) * weight;
+            weights += weight;
+        }
+        result = total / weights;
+    }
+#ifdef RESOLVE
+    fragColor = vec4(result / 255.0);
+#else
+    packedOcclusion = (center & 0xFFFFFF00u) | uint(result + 0.5);
+#endif
+}
+)";
+
+        const char* compositeFragmentSource = R"(#version 330 core
+uniform sampler2D uOcclusion;
+uniform highp sampler2D uMask;
+uniform vec4 uMapping;
+out vec4 fragColor;
+void main()
+{
+    float occlusion = texture(uOcclusion, gl_FragCoord.xy * uMapping.xy + uMapping.zw).r;
+    float receiver = texelFetch(uMask, ivec2(gl_FragCoord.xy), 0).r;
+    fragColor = vec4(vec3(receiver < 0.01 ? 1.0 : occlusion), 1.0);
+}
+)";
+
         GLuint compile(GLenum type, const char* source, const char* prefix = "")
         {
             GLuint shader = glCreateShader(type);
@@ -273,10 +417,10 @@ void main()
             return shader;
         }
 
-        GLuint linkFullscreen(const char* source)
+        GLuint linkFullscreen(const char* source, const char* prefix = "")
         {
             GLuint vertex = compile(GL_VERTEX_SHADER, gammaVertexSource);
-            GLuint fragment = compile(GL_FRAGMENT_SHADER, source);
+            GLuint fragment = compile(GL_FRAGMENT_SHADER, source, prefix);
             GLuint program = glCreateProgram();
             glAttachShader(program, vertex);
             glAttachShader(program, fragment);
@@ -327,6 +471,7 @@ void main()
             location.forward = glGetUniformLocation(program, "uForward");
             location.clipPlanes = glGetUniformLocation(program, "uClipPlanes");
             location.clipCount = glGetUniformLocation(program, "uClipCount");
+            location.occlusion = glGetUniformLocation(program, "uOcclusion");
             glUseProgram(program);
             glUniform1i(glGetUniformLocation(program, "uTexture"), 0);
             glUniform1i(glGetUniformLocation(program, "uLightmap"), 1);
@@ -401,6 +546,7 @@ void main()
         glUniform3fv(location.forward, 1, state.forward);
         glUniform4fv(location.clipPlanes, 8, state.clipPlanes);
         glUniform1i(location.clipCount, state.clipCount);
+        glUniform1f(location.occlusion, state.occlusion);
     }
 
     void UberShader::setViewProj(const Mat4& matrix)
@@ -466,6 +612,13 @@ void main()
             glUniform4fv(locations[current].clipPlanes, count, planes);
         }
         glUniform1i(locations[current].clipCount, count);
+    }
+
+    void UberShader::setOcclusion(float weight)
+    {
+        state.occlusion = weight;
+        stale[1 - current] = true;
+        glUniform1f(locations[current].occlusion, weight);
     }
 
     void UberShader::setTint(float r, float g, float b, float a)
@@ -733,35 +886,97 @@ void main()
             glDeleteRenderbuffers(1, &colorBuffer);
             glDeleteRenderbuffers(1, &depthBuffer);
         }
+        releaseMask();
+        releaseTextures();
         glDeleteTextures(1, &texture);
         glDeleteVertexArrays(1, &vao);
         glDeleteProgram(program);
     }
 
-    void ScenePass::begin(int width, int height, int samples)
+    void ScenePass::begin(int width, int height, int samples, bool occlusion)
     {
         samples = std::min(samples, static_cast<int>(maxSamples));
-        multisampled = samples > 1;
-        if (!multisampled) {
+        offscreen = samples > 1 || occlusion;
+        occlusionActive = occlusion;
+        if (!offscreen) {
+            if (framebuffer) {
+                glDeleteFramebuffers(1, &framebuffer);
+                glDeleteRenderbuffers(1, &colorBuffer);
+                glDeleteRenderbuffers(1, &depthBuffer);
+                releaseTextures();
+                releaseMask();
+                framebuffer = 0;
+                colorBuffer = 0;
+                depthBuffer = 0;
+                bufferWidth = 0;
+            }
             return;
+        }
+        if (samples < 2) {
+            samples = 0;
         }
         glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &target);
         if (!framebuffer) {
             glGenFramebuffers(1, &framebuffer);
             glGenRenderbuffers(1, &colorBuffer);
-            glGenRenderbuffers(1, &depthBuffer);
         }
         glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
-        if (width != bufferWidth || height != bufferHeight || samples != bufferSamples) {
+        if (width != bufferWidth || height != bufferHeight || samples != bufferSamples || occlusion != bufferOcclusion) {
             glBindRenderbuffer(GL_RENDERBUFFER, colorBuffer);
-            glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_RGBA8, width, height);
-            glBindRenderbuffer(GL_RENDERBUFFER, depthBuffer);
-            glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_DEPTH24_STENCIL8, width, height);
+            glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_RGB8, width, height);
             glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, colorBuffer);
-            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, depthBuffer);
+            if (occlusion && samples == 0) {
+                if (!depthTexture) {
+                    glGenTextures(1, &depthTexture);
+                    glGenTextures(1, &maskTexture);
+                }
+                GLint bound = 0;
+                glGetIntegerv(GL_TEXTURE_BINDING_2D, &bound);
+                glBindTexture(GL_TEXTURE_2D, depthTexture);
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, width, height, 0, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, nullptr);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+                glBindTexture(GL_TEXTURE_2D, maskTexture);
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, width, height, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+                glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(bound));
+                glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, depthTexture, 0);
+                glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, maskTexture, 0);
+                glDeleteRenderbuffers(1, &depthBuffer);
+                depthBuffer = 0;
+                releaseMask();
+            } else {
+                if (!depthBuffer) {
+                    glGenRenderbuffers(1, &depthBuffer);
+                }
+                glBindRenderbuffer(GL_RENDERBUFFER, depthBuffer);
+                glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_DEPTH24_STENCIL8, width, height);
+                glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, depthBuffer);
+                if (occlusion) {
+                    if (!maskBuffer) {
+                        glGenRenderbuffers(1, &maskBuffer);
+                    }
+                    glBindRenderbuffer(GL_RENDERBUFFER, maskBuffer);
+                    glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_R8, width, height);
+                    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_RENDERBUFFER, maskBuffer);
+                } else {
+                    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_RENDERBUFFER, 0);
+                    GLenum buffer = GL_COLOR_ATTACHMENT0;
+                    glDrawBuffers(1, &buffer);
+                    releaseMask();
+                }
+                releaseTextures();
+            }
             bufferWidth = width;
             bufferHeight = height;
             bufferSamples = samples;
+            bufferOcclusion = occlusion;
+        }
+        if (occlusion) {
+            maskWrites = true;
+            GLenum buffers[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+            glDrawBuffers(2, buffers);
         }
         glDisable(GL_SCISSOR_TEST);
         glViewport(0, 0, width, height);
@@ -772,12 +987,13 @@ void main()
 
     void ScenePass::end(int width, int height, bool fxaa)
     {
-        if (multisampled) {
+        if (offscreen) {
             glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(target));
             glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
             glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(target));
-            multisampled = false;
+            offscreen = false;
+            occlusionActive = false;
         }
         if (!fxaa) {
             return;
@@ -798,5 +1014,329 @@ void main()
         glUniform2f(inverseSizeLocation, 1.0f / static_cast<float>(width), 1.0f / static_cast<float>(height));
         glBindVertexArray(vao);
         glDrawArrays(GL_TRIANGLES, 0, 3);
+    }
+
+    bool ScenePass::occluding() const
+    {
+        return occlusionActive;
+    }
+
+    uint32_t ScenePass::sceneFramebuffer() const
+    {
+        return framebuffer;
+    }
+
+    uint32_t ScenePass::sceneDepth() const
+    {
+        return bufferOcclusion && bufferSamples == 0 ? depthTexture : 0;
+    }
+
+    uint32_t ScenePass::sceneMask() const
+    {
+        return bufferOcclusion && bufferSamples == 0 ? maskTexture : 0;
+    }
+
+    void ScenePass::releaseTextures()
+    {
+        glDeleteTextures(1, &depthTexture);
+        glDeleteTextures(1, &maskTexture);
+        depthTexture = 0;
+        maskTexture = 0;
+    }
+
+    void ScenePass::releaseMask()
+    {
+        glDeleteRenderbuffers(1, &maskBuffer);
+        maskBuffer = 0;
+    }
+
+    void ScenePass::setMaskWrites(bool enabled)
+    {
+        if (!occlusionActive || enabled == maskWrites) {
+            return;
+        }
+        maskWrites = enabled;
+        GLenum buffers[2] = { GL_COLOR_ATTACHMENT0, enabled ? static_cast<GLenum>(GL_COLOR_ATTACHMENT1) : static_cast<GLenum>(GL_NONE) };
+        glDrawBuffers(2, buffers);
+    }
+
+    void ScenePass::clearMask()
+    {
+        if (!occlusionActive) {
+            return;
+        }
+        GLenum buffers[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+        glDrawBuffers(2, buffers);
+        const GLfloat zero[4] = {};
+        glClearBufferfv(GL_COLOR, 1, zero);
+        if (!maskWrites) {
+            buffers[1] = GL_NONE;
+            glDrawBuffers(2, buffers);
+        }
+    }
+
+    OcclusionPass::OcclusionPass()
+    {
+        Program* programs[7] = { &prepare, &occlusion[0], &occlusion[1], &occlusion[2], &blur, &blurResolve, &composite };
+        const char* sources[7] = { prepareFragmentSource, occlusionFragmentSource, occlusionFragmentSource, occlusionFragmentSource, blurFragmentSource, blurFragmentSource, compositeFragmentSource };
+        const char* prefixes[7] = { "", "#version 330 core\n#define SAMPLES 8\n", "#version 330 core\n#define SAMPLES 12\n", "#version 330 core\n#define SAMPLES 16\n", "#version 330 core\n", "#version 330 core\n#define RESOLVE\n", "" };
+        for (size_t i = 0; i < 7; i++) {
+            Program& program = *programs[i];
+            program.id = linkFullscreen(sources[i], prefixes[i]);
+            program.linearize = glGetUniformLocation(program.id, "uLinearize");
+            program.divisor = glGetUniformLocation(program.id, "uDivisor");
+            program.unproject = glGetUniformLocation(program.id, "uUnproject");
+            program.direction = glGetUniformLocation(program.id, "uDirection");
+            program.mapping = glGetUniformLocation(program.id, "uMapping");
+            glUseProgram(program.id);
+            glUniform1i(glGetUniformLocation(program.id, "uPacked"), 0);
+            glUniform1i(glGetUniformLocation(program.id, "uOcclusion"), 0);
+            glUniform1i(glGetUniformLocation(program.id, "uDepth"), 1);
+            glUniform1i(glGetUniformLocation(program.id, "uMask"), 2);
+        }
+        glGenVertexArrays(1, &vao);
+        glGenFramebuffers(3, packedFramebuffers);
+        glGenFramebuffers(1, &resultFramebuffer);
+        glGenTextures(3, packedTextures);
+        glGenTextures(1, &resultTexture);
+        uint32_t textures[4] = { packedTextures[0], packedTextures[1], packedTextures[2], resultTexture };
+        for (uint32_t texture : textures) {
+            GLint filter = texture == resultTexture ? GL_LINEAR : GL_NEAREST;
+            glBindTexture(GL_TEXTURE_2D, texture);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        }
+    }
+
+    OcclusionPass::~OcclusionPass()
+    {
+        releaseResolve();
+        glDeleteTextures(1, &resultTexture);
+        glDeleteTextures(3, packedTextures);
+        glDeleteFramebuffers(1, &resultFramebuffer);
+        glDeleteFramebuffers(3, packedFramebuffers);
+        glDeleteVertexArrays(1, &vao);
+        glDeleteProgram(prepare.id);
+        for (const Program& program : occlusion) {
+            glDeleteProgram(program.id);
+        }
+        glDeleteProgram(blur.id);
+        glDeleteProgram(blurResolve.id);
+        glDeleteProgram(composite.id);
+    }
+
+    void OcclusionPass::release()
+    {
+        releaseResolve();
+        if (textureWidth == 0) {
+            return;
+        }
+        textureWidth = 0;
+        textureHeight = 0;
+        textureDivisor = 0;
+        GLint bound = 0;
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &bound);
+        uint32_t textures[4] = { packedTextures[0], packedTextures[1], packedTextures[2], resultTexture };
+        for (uint32_t texture : textures) {
+            glBindTexture(GL_TEXTURE_2D, texture);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, 0, 0, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
+        }
+        glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(bound));
+    }
+
+    void OcclusionPass::releaseResolve()
+    {
+        if (!resolveFramebuffer) {
+            return;
+        }
+        glDeleteFramebuffers(1, &resolveFramebuffer);
+        glDeleteTextures(1, &depthTexture);
+        glDeleteTextures(1, &maskTexture);
+        resolveFramebuffer = 0;
+        depthTexture = 0;
+        maskTexture = 0;
+        resolveWidth = 0;
+        resolveHeight = 0;
+    }
+
+    void OcclusionPass::resize(int width, int height, int divisor)
+    {
+        if (width == textureWidth && height == textureHeight && divisor == textureDivisor) {
+            return;
+        }
+        textureWidth = width;
+        textureHeight = height;
+        textureDivisor = divisor;
+        packedWidth = (width + divisor - 1) / divisor;
+        packedHeight = (height + divisor - 1) / divisor;
+        for (size_t i = 0; i < 3; i++) {
+            glBindTexture(GL_TEXTURE_2D, packedTextures[i]);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_R32UI, packedWidth, packedHeight, 0, GL_RED_INTEGER, GL_UNSIGNED_INT, nullptr);
+            glBindFramebuffer(GL_FRAMEBUFFER, packedFramebuffers[i]);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, packedTextures[i], 0);
+        }
+        glBindTexture(GL_TEXTURE_2D, resultTexture);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, packedWidth, packedHeight, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
+        glBindFramebuffer(GL_FRAMEBUFFER, resultFramebuffer);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, resultTexture, 0);
+    }
+
+    void OcclusionPass::resolve(uint32_t sceneFramebuffer, int width, int height)
+    {
+        if (!resolveFramebuffer) {
+            glGenFramebuffers(1, &resolveFramebuffer);
+            glGenTextures(1, &depthTexture);
+            glGenTextures(1, &maskTexture);
+        }
+        if (width != resolveWidth || height != resolveHeight) {
+            resolveWidth = width;
+            resolveHeight = height;
+            glBindTexture(GL_TEXTURE_2D, depthTexture);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, width, height, 0, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, nullptr);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glBindTexture(GL_TEXTURE_2D, maskTexture);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, width, height, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glBindFramebuffer(GL_FRAMEBUFFER, resolveFramebuffer);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, maskTexture, 0);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, depthTexture, 0);
+        }
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, sceneFramebuffer);
+        glReadBuffer(GL_COLOR_ATTACHMENT1);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, resolveFramebuffer);
+        glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+        glReadBuffer(GL_COLOR_ATTACHMENT0);
+    }
+
+    void OcclusionPass::run(const Program& program, uint32_t target, int width, int height, uint32_t texture)
+    {
+        glBindFramebuffer(GL_FRAMEBUFFER, target);
+        glViewport(0, 0, width, height);
+        glUseProgram(program.id);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+    }
+
+    void OcclusionPass::apply(uint32_t sceneFramebuffer, uint32_t sceneDepth, uint32_t sceneMask, int width, int height, OcclusionQuality quality, float nearPlane, float farPlane, float tanHalfWidth, float tanHalfHeight)
+    {
+        GLint savedProgram = 0;
+        GLint savedViewport[4] = {};
+        GLint savedActive = 0;
+        GLint savedTextures[3] = {};
+        GLint savedVao = 0;
+        GLint savedBlendSource = 0;
+        GLint savedBlendDestination = 0;
+        GLint savedDrawBuffers[2] = {};
+        GLboolean savedDepthMask = GL_TRUE;
+        GLboolean savedColorMask[4] = {};
+        glGetIntegerv(GL_CURRENT_PROGRAM, &savedProgram);
+        glGetIntegerv(GL_VIEWPORT, savedViewport);
+        glGetIntegerv(GL_ACTIVE_TEXTURE, &savedActive);
+        for (GLint unit = 0; unit < 3; unit++) {
+            glActiveTexture(static_cast<GLenum>(GL_TEXTURE0 + unit));
+            glGetIntegerv(GL_TEXTURE_BINDING_2D, &savedTextures[unit]);
+        }
+        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &savedVao);
+        glGetIntegerv(GL_BLEND_SRC_RGB, &savedBlendSource);
+        glGetIntegerv(GL_BLEND_DST_RGB, &savedBlendDestination);
+        glGetIntegerv(GL_DRAW_BUFFER0, &savedDrawBuffers[0]);
+        glGetIntegerv(GL_DRAW_BUFFER1, &savedDrawBuffers[1]);
+        glGetBooleanv(GL_DEPTH_WRITEMASK, &savedDepthMask);
+        glGetBooleanv(GL_COLOR_WRITEMASK, savedColorMask);
+        GLenum capabilities[4] = { GL_BLEND, GL_DEPTH_TEST, GL_CULL_FACE, GL_SCISSOR_TEST };
+        GLboolean savedCapabilities[4] = {};
+        for (size_t i = 0; i < 4; i++) {
+            savedCapabilities[i] = glIsEnabled(capabilities[i]);
+            glDisable(capabilities[i]);
+        }
+#ifndef __EMSCRIPTEN__
+        GLboolean savedClips[8] = {};
+        for (GLenum i = 0; i < 8; i++) {
+            savedClips[i] = glIsEnabled(GL_CLIP_DISTANCE0 + i);
+            glDisable(GL_CLIP_DISTANCE0 + i);
+        }
+#endif
+        glDepthMask(GL_FALSE);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+
+        int divisor = quality == OcclusionQuality::High ? 1 : 2;
+        resize(width, height, divisor);
+        bool attached = sceneDepth != 0;
+        if (!attached) {
+            resolve(sceneFramebuffer, width, height);
+            sceneDepth = depthTexture;
+            sceneMask = maskTexture;
+        } else {
+            releaseResolve();
+        }
+        glBindVertexArray(vao);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, sceneDepth);
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D, sceneMask);
+        float scale = static_cast<float>(divisor);
+        const Program& estimator = occlusion[static_cast<size_t>(quality) - 1];
+        glUseProgram(prepare.id);
+        glUniform3f(prepare.linearize, nearPlane * farPlane, farPlane, farPlane - nearPlane);
+        glUniform1i(prepare.divisor, divisor);
+        run(prepare, packedFramebuffers[0], packedWidth, packedHeight, 0);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glUseProgram(estimator.id);
+        glUniform4f(estimator.unproject, 2.0f * scale * tanHalfWidth / static_cast<float>(width), 2.0f * scale * tanHalfHeight / static_cast<float>(height), (1.0f / static_cast<float>(width) - 1.0f) * tanHalfWidth, (1.0f / static_cast<float>(height) - 1.0f) * tanHalfHeight);
+        run(estimator, packedFramebuffers[1], packedWidth, packedHeight, packedTextures[0]);
+        glUseProgram(blur.id);
+        glUniform2i(blur.direction, 1, 0);
+        run(blur, packedFramebuffers[2], packedWidth, packedHeight, packedTextures[1]);
+        glUseProgram(blurResolve.id);
+        glUniform2i(blurResolve.direction, 0, 1);
+        run(blurResolve, resultFramebuffer, packedWidth, packedHeight, packedTextures[2]);
+        glBindFramebuffer(GL_FRAMEBUFFER, sceneFramebuffer);
+        if (attached) {
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, 0, 0);
+        }
+        GLenum colorOnly = GL_COLOR_ATTACHMENT0;
+        glDrawBuffers(1, &colorOnly);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_ZERO, GL_SRC_COLOR);
+        glUseProgram(composite.id);
+        glUniform4f(composite.mapping, 1.0f / (scale * static_cast<float>(packedWidth)), 1.0f / (scale * static_cast<float>(packedHeight)), (0.5f - 0.5f / scale) / static_cast<float>(packedWidth), (0.5f - 0.5f / scale) / static_cast<float>(packedHeight));
+        run(composite, sceneFramebuffer, width, height, resultTexture);
+        if (attached) {
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, sceneMask, 0);
+        }
+
+        GLenum restoredBuffers[2] = { static_cast<GLenum>(savedDrawBuffers[0]), static_cast<GLenum>(savedDrawBuffers[1]) };
+        glDrawBuffers(2, restoredBuffers);
+        glBlendFunc(static_cast<GLenum>(savedBlendSource), static_cast<GLenum>(savedBlendDestination));
+        for (size_t i = 0; i < 4; i++) {
+            if (savedCapabilities[i]) {
+                glEnable(capabilities[i]);
+            } else {
+                glDisable(capabilities[i]);
+            }
+        }
+#ifndef __EMSCRIPTEN__
+        for (GLenum i = 0; i < 8; i++) {
+            if (savedClips[i]) {
+                glEnable(GL_CLIP_DISTANCE0 + i);
+            }
+        }
+#endif
+        glDepthMask(savedDepthMask);
+        glColorMask(savedColorMask[0], savedColorMask[1], savedColorMask[2], savedColorMask[3]);
+        for (GLint unit = 0; unit < 3; unit++) {
+            glActiveTexture(static_cast<GLenum>(GL_TEXTURE0 + unit));
+            glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(savedTextures[unit]));
+        }
+        glActiveTexture(static_cast<GLenum>(savedActive));
+        glBindVertexArray(static_cast<GLuint>(savedVao));
+        glViewport(savedViewport[0], savedViewport[1], savedViewport[2], savedViewport[3]);
+        glUseProgram(static_cast<GLuint>(savedProgram));
     }
 }

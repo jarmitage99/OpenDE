@@ -75,6 +75,15 @@ add_library(imgui STATIC
 target_include_directories(imgui SYSTEM PUBLIC ${CMAKE_SOURCE_DIR}/vendor/imgui ${CMAKE_SOURCE_DIR}/vendor/imgui/backends)
 target_link_libraries(imgui PUBLIC SDL2::SDL2-static)
 
+# ImGuizmo
+add_library(imguizmo STATIC ${CMAKE_SOURCE_DIR}/vendor/imguizmo/ImGuizmo.cpp)
+target_include_directories(imguizmo SYSTEM PUBLIC ${CMAKE_SOURCE_DIR}/vendor/imguizmo)
+target_link_libraries(imguizmo PUBLIC imgui)
+
+# stb_image
+add_library(stb_image STATIC ${CMAKE_SOURCE_DIR}/vendor/stb/stb_image.c)
+target_include_directories(stb_image SYSTEM PUBLIC ${CMAKE_SOURCE_DIR}/vendor/stb)
+
 # Catch
 add_library(Catch2 STATIC ${CMAKE_SOURCE_DIR}/vendor/catch-3.16.0/catch_amalgamated.cpp)
 target_include_directories(Catch2 SYSTEM PUBLIC ${CMAKE_SOURCE_DIR}/vendor/catch-3.16.0)

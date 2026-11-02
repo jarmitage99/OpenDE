@@ -70,6 +70,40 @@ TEST_CASE("level tick measures each dynamic actor's distance from the player", "
     dx::objects::unloadPackage(dx::Name("01_NYC_UNATCOIsland"));
 }
 
+TEST_CASE("frames shorter than five milliseconds advance actors in real time", "[data]")
+{
+    dx::engine::initialize(DEUSEX_GAME_DATA);
+    dx::objects::unloadPackage(dx::Name("01_NYC_UNATCOIsland"));
+    dx::World world;
+    REQUIRE(world.loadMap("01_NYC_UNATCOIsland"));
+    dx::UObject* player = world.player();
+    REQUIRE(player != nullptr);
+    dx::UClass* crateClass = dx::objects::findClass("DeusEx.CrateUnbreakableSmall");
+    dx::objects::flushLoads();
+    REQUIRE(crateClass != nullptr);
+    auto travelled = [&](float height, float step, int steps) {
+        dx::Vector start = dx::actor::Location(player) + dx::Vector { 0, 0, height };
+        dx::UObject* crate = world.spawn(crateClass, nullptr, dx::Name(), start, {}, nullptr, true);
+        REQUIRE(crate != nullptr);
+        dx::actor::bCollideWorld(crate) = 0;
+        dx::actor::bCollideActors(crate) = 0;
+        dx::actor::Physics(crate) = dx::PHYS_Projectile;
+        dx::actor::Velocity(crate) = { 100, 0, 0 };
+        start = dx::actor::Location(crate);
+        float before = world.timeSeconds;
+        for (int i = 0; i < steps; i++) {
+            world.tick(step);
+        }
+        CHECK(world.timeSeconds - before == Catch::Approx(1.0f).epsilon(0.01));
+        return (dx::actor::Location(crate) - start).size();
+    };
+    float coarse = travelled(200.0f, 0.01f, 100);
+    float fine = travelled(400.0f, 0.001f, 1000);
+    CHECK(coarse == Catch::Approx(100.0f).epsilon(0.02));
+    CHECK(fine == Catch::Approx(100.0f).epsilon(0.02));
+    dx::objects::unloadPackage(dx::Name("01_NYC_UNATCOIsland"));
+}
+
 TEST_CASE("LastRendered reports time since the actor was drawn and never goes negative", "[data]")
 {
     dx::engine::initialize(DEUSEX_GAME_DATA);

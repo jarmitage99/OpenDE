@@ -199,6 +199,17 @@ namespace dx::extension {
         return std::max(std::min(realWidth, std::ceil(fittedHeight() / virtualScale()) * 16.0f / 9.0f), virtualWidth());
     }
 
+    bool spansSafeArea(UWindow* window, float absoluteX)
+    {
+        URootWindow* rootWindow = window->root();
+        if (!window->parent() || !rootWindow) {
+            return false;
+        }
+        float safeWidth = extendedVirtualWidth();
+        float safeLeft = rootWindow->usedX - std::round((safeWidth - rootWindow->width()) * 0.5f);
+        return absoluteX <= safeLeft + 0.5f && absoluteX + window->width() >= safeLeft + safeWidth - 0.5f;
+    }
+
     UClass* extensionClass(const char* path)
     {
         UClass* cls = objects::findClass(path);
@@ -607,7 +618,7 @@ namespace dx::extension {
             float parentWidth = owner->width();
             float parentHeight = owner->height();
             bool parentIsRoot = owner == state().root;
-            float rootWidth = isA(Name("DeusExScopeView")) ? std::ceil(state().viewportWidth / virtualScale()) : extendedVirtualWidth();
+            float rootWidth = extendedVirtualWidth();
             if (halign == HALIGN_Full || valign == VALIGN_Full) {
                 float newWidth = width();
                 float newHeight = height();
@@ -1282,10 +1293,12 @@ namespace dx::extension {
         gc->setStyle(window::backgroundStyle(this));
         gc::bSmoothed(gc) = window::bSmoothBackground(this);
         gc::tileColor(gc) = window::tileColor(this);
+        float startX = x;
+        gc->bleed(x, w);
         if (window::bStretchBackground(this)) {
             gc->drawStretched(x, y, w, h, 0, 0, textureWidth(background), textureHeight(background), background);
         } else {
-            gc->drawPattern(x, y, w, h, 0, 0, background);
+            gc->drawPattern(x, y, w, h, x - startX, 0, background);
         }
         gc->resetState(this, gc->offsetX, gc->offsetY);
     }
@@ -1727,11 +1740,15 @@ namespace dx::extension {
         }
         float px = mouseX();
         float py = mouseY();
+        float originX = usedX;
         UWindow* current = this;
         while (true) {
             UWindow* found = nullptr;
             for (UWindow* child = current->lastChild(); child; child = child->prevSibling()) {
-                if (child->visible() && child->usedX <= px && child->usedY <= py && child->usedX + child->width() > px && child->usedY + child->height() > py) {
+                if (!child->visible() || child->usedY > py || child->usedY + child->height() <= py) {
+                    continue;
+                }
+                if (spansSafeArea(child, originX + child->usedX) || (child->usedX <= px && child->usedX + child->width() > px)) {
                     found = child;
                     break;
                 }
@@ -1740,6 +1757,7 @@ namespace dx::extension {
                 break;
             }
             current = found;
+            originX += found->usedX;
             px -= found->usedX;
             py -= found->usedY;
         }
@@ -1936,7 +1954,9 @@ namespace dx::extension {
             offsetX += window->usedX;
             offsetY += window->usedY;
             bool clipped = window->parent() != nullptr;
-            if (clipped) {
+            if (clipped && spansSafeArea(window, offsetX)) {
+                gc->pushClip(0, offsetY, state().viewportWidth / virtualScale(), window->height());
+            } else if (clipped) {
                 gc->pushClip(offsetX, offsetY, window->width(), window->height());
             }
             gc->resetState(window, offsetX, offsetY);
@@ -2948,13 +2968,13 @@ namespace dx::extension {
             bool inFront = state().projector(location, pixelX, pixelY);
             float rootX = 0;
             float rootY = 0;
+            float scale = virtualScale();
             if (inFront) {
-                float scale = virtualScale();
                 rootX = std::trunc(pixelX / scale - rootWindow->usedX);
                 rootY = std::trunc(pixelY / scale - rootWindow->usedY);
             } else {
-                rootX = std::trunc(state().viewportWidth * 0.5f);
-                rootY = std::trunc(state().viewportHeight * 0.5f);
+                rootX = std::trunc(state().viewportWidth * 0.5f / scale - rootWindow->usedX);
+                rootY = std::trunc(state().viewportHeight * 0.5f / scale - rootWindow->usedY);
             }
             float ax = 0;
             float ay = 0;

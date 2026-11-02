@@ -282,6 +282,11 @@ namespace dx::compiler {
         }
         auto it = classes.find(Name::find(name));
         if (it == classes.end() || Name::find(name).none()) {
+            if (objects::isIntrinsicClassName(name)) {
+                UClass* intrinsic = objects::intrinsicClass(Name(std::string(name)));
+                add(intrinsic);
+                return intrinsic;
+            }
             return nullptr;
         }
         objects::ensureLoaded(it->second);
@@ -355,6 +360,11 @@ namespace dx::compiler {
             for (UObject* candidate : candidates) {
                 if (candidate->isA(cls) && (!found || earlier(candidate, found))) {
                     found = candidate;
+                }
+            }
+            for (UObject* object : objects::all()) {
+                if (!found && object && !object->destroyed && object->name == parts.back() && object->outer && object->isA(cls)) {
+                    found = object;
                 }
             }
         }

@@ -314,44 +314,6 @@ TEST_CASE("a loaded saved level keeps the options of its saved URL", "[data]")
     std::filesystem::remove_all(root);
 }
 
-TEST_CASE("zzprobe pitch", "[data]")
-{
-    dx::engine::initialize(DEUSEX_GAME_DATA);
-    std::filesystem::path root = freshSaveRoot("dx-savegame-test-pitch");
-    unloadMaps();
-    for (int pitch : { 64000, 1500 }) {
-        {
-            dx::World world;
-            REQUIRE(world.loadMap(MapName));
-            for (int i = 0; i < 10; i++) {
-                world.tick(1.0f / 30.0f);
-            }
-            dx::UObject* player = world.player();
-            dx::pawn::ViewRotation(player).pitch = pitch;
-            for (int i = 0; i < 10; i++) {
-                world.tick(1.0f / 30.0f);
-            }
-            std::printf("before %d rot %d\n", dx::pawn::ViewRotation(player).pitch, dx::actor::Rotation(player).pitch);
-            REQUIRE(dx::savegame::saveGame(world, 8, "pitch"));
-            unloadMaps();
-        }
-        std::string map;
-        REQUIRE(dx::savegame::prepareLoad(8, map));
-        std::string url = map + "?loadgame=8";
-        REQUIRE(dx::savegame::selectLevel(url));
-        dx::World loaded;
-        REQUIRE(loaded.loadMap(url));
-        dx::UObject* player = loaded.player();
-        std::printf("loaded %d rot %d\n", dx::pawn::ViewRotation(player).pitch, dx::actor::Rotation(player).pitch);
-        for (int i = 0; i < 5; i++) {
-            loaded.tick(1.0f / 30.0f);
-            std::printf("tick %d %d rot %d\n", i, dx::pawn::ViewRotation(player).pitch, dx::actor::Rotation(player).pitch);
-        }
-        unloadMaps();
-    }
-    std::filesystem::remove_all(root);
-}
-
 TEST_CASE("plane struct values are written and read with their own member W before the inherited X Y Z", "[data]")
 {
     dx::engine::initialize(DEUSEX_GAME_DATA);

@@ -61,6 +61,7 @@ namespace dx::extension {
     float virtualHeight();
     float virtualWidth();
     float extendedVirtualWidth();
+    bool spansSafeArea(UWindow* window, float absoluteX);
 
     UGC* sharedGC();
     UObject* defaultFont();

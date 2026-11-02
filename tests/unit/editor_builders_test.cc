@@ -93,12 +93,13 @@ namespace {
 TEST_CASE("extra builders expose the VB form defaults", "[editor_builders]")
 {
     std::vector<dx::brushbuilder::ExtraBuilder> builders = dx::brushbuilder::extraBuilders();
-    REQUIRE(builders.size() == 5);
+    REQUIRE(builders.size() == 6);
     CHECK(builders[0].name == "LinearStair");
     CHECK(builders[1].name == "CurvedStair");
     CHECK(builders[2].name == "SpiralStair");
     CHECK(builders[3].name == "Sphere");
     CHECK(builders[4].name == "Volumetric");
+    CHECK(builders[5].name == "Tube");
     CHECK(defaultOf("LinearStair", "StepLength") == 32);
     CHECK(defaultOf("LinearStair", "NumSteps") == 8);
     CHECK(defaultOf("CurvedStair", "InnerRad") == 240);

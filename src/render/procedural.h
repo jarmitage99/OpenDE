@@ -20,8 +20,11 @@ namespace dx {
         static bool isProcedural(UTexture* texture);
         bool update(UTexture* texture, double time, std::vector<uint8_t>& rgba, uint32_t& width, uint32_t& height);
         void clear();
+        void reset(UTexture* texture);
+        void setConstantRate(float rate);
 
     private:
         std::unordered_map<UTexture*, std::unique_ptr<ProceduralState>> states;
+        float constantRate = 0;
     };
 }

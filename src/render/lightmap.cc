@@ -3,8 +3,7 @@
 #include "core/objects.h"
 #include "engine/props_engine.h"
 #include "render/lighting.h"
-
-#include <glad/gl.h>
+#include "render/render_device.h"
 
 #include <algorithm>
 #include <cmath>
@@ -312,8 +311,9 @@ namespace dx {
         return result;
     }
 
-    LightmapAtlas::LightmapAtlas(int32_t size)
-        : PageSize(size)
+    LightmapAtlas::LightmapAtlas(RenderDevice& renderDevice, int32_t size)
+        : device(renderDevice)
+        , PageSize(size)
     {
     }
 
@@ -329,13 +329,9 @@ namespace dx {
 
     void LightmapAtlas::clear()
     {
-        if (!textures.empty()) {
-            glDeleteTextures(static_cast<GLsizei>(textures.size()), textures.data());
-        }
+        device.deleteLightmaps(textures);
         textures.clear();
-        if (!fogTextures.empty()) {
-            glDeleteTextures(static_cast<GLsizei>(fogTextures.size()), fogTextures.data());
-        }
+        device.deleteLightmaps(fogTextures);
         fogTextures.clear();
         pages.clear();
         placements.clear();
@@ -467,17 +463,8 @@ namespace dx {
             entry.zones = 1ull << (variantPlacements[static_cast<size_t>(entry.variant)].first & 63);
         }
         textures.resize(pages.size());
-        if (!textures.empty()) {
-            glGenTextures(static_cast<GLsizei>(textures.size()), textures.data());
-        }
         for (size_t i = 0; i < pages.size(); i++) {
-            glBindTexture(GL_TEXTURE_2D, textures[i]);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, PageSize, PageSize, 0, GL_RGBA, GL_UNSIGNED_BYTE, pages[i].pixels.data());
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            textures[i] = device.createLightmap(PageSize, pages[i].pixels.data());
             pages[i].pixels.clear();
             pages[i].pixels.shrink_to_fit();
         }
@@ -498,8 +485,7 @@ namespace dx {
             entry.bytes.swap(bytes);
             const LightmapPlacement& placement = entry.variant >= 0 ? variantPlacements[static_cast<size_t>(entry.variant)].second : placements[entry.lightMap];
             padPixels(entry.bytes, entry.lighting.width, entry.lighting.height, entry.pixels);
-            glBindTexture(GL_TEXTURE_2D, textures[static_cast<size_t>(placement.page)]);
-            glTexSubImage2D(GL_TEXTURE_2D, 0, placement.x - Padding, placement.y - Padding, entry.lighting.width + 2 * Padding, entry.lighting.height + 2 * Padding, GL_RGBA, GL_UNSIGNED_BYTE, entry.pixels.data());
+            device.updateLightmap(textures[static_cast<size_t>(placement.page)], placement.x - Padding, placement.y - Padding, entry.lighting.width + 2 * Padding, entry.lighting.height + 2 * Padding, entry.pixels.data());
         }
     }
 
@@ -538,16 +524,9 @@ namespace dx {
         }
         if (fogTextures.empty() && !textures.empty()) {
             fogTextures.resize(textures.size());
-            glGenTextures(static_cast<GLsizei>(fogTextures.size()), fogTextures.data());
             std::vector<uint8_t> zeros(static_cast<size_t>(PageSize * PageSize * 4), 0);
-            for (uint32_t id : fogTextures) {
-                glBindTexture(GL_TEXTURE_2D, id);
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, PageSize, PageSize, 0, GL_RGBA, GL_UNSIGNED_BYTE, zeros.data());
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            for (uint32_t& id : fogTextures) {
+                id = device.createLightmap(PageSize, zeros.data());
             }
         }
         padPixels(bytes, width, height, fogPixels);
@@ -558,8 +537,7 @@ namespace dx {
             if (placement->page < 0 || static_cast<size_t>(placement->page) >= fogTextures.size()) {
                 continue;
             }
-            glBindTexture(GL_TEXTURE_2D, fogTextures[static_cast<size_t>(placement->page)]);
-            glTexSubImage2D(GL_TEXTURE_2D, 0, placement->x - Padding, placement->y - Padding, width + 2 * Padding, height + 2 * Padding, GL_RGBA, GL_UNSIGNED_BYTE, fogPixels.data());
+            device.updateLightmap(fogTextures[static_cast<size_t>(placement->page)], placement->x - Padding, placement->y - Padding, width + 2 * Padding, height + 2 * Padding, fogPixels.data());
         }
     }
 

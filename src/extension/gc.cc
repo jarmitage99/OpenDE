@@ -416,6 +416,26 @@ namespace dx::extension {
         }
         offsetX = newOffsetX;
         offsetY = newOffsetY;
+        bleedLeft = 0;
+        bleedRight = 0;
+        bleedEdge = 0;
+        if (window && spansSafeArea(window, newOffsetX)) {
+            bleedLeft = std::max(newOffsetX, 0.0f);
+            bleedRight = std::max(state().viewportWidth / virtualScale() - newOffsetX - window->width(), 0.0f);
+            bleedEdge = window->width();
+        }
+    }
+
+    void UGC::bleed(float& destX, float& destWidth)
+    {
+        float right = destX + destWidth;
+        if (destX <= 0.0f) {
+            destX -= bleedLeft;
+        }
+        if (right >= bleedEdge) {
+            right += bleedRight;
+        }
+        destWidth = right - destX;
     }
 
     void UGC::resetClip(float clipX, float clipY, float clipWidth, float clipHeight)
@@ -1172,7 +1192,9 @@ namespace dx::extension {
             UObject* texture = vm::get<UObject*>(stack);
             vm::finish(stack);
             if (UGC* gc = self(object)) {
-                gc->drawPattern(destX, destY, destWidth, destHeight, orgX, orgY, texture);
+                float startX = destX;
+                gc->bleed(destX, destWidth);
+                gc->drawPattern(destX, destY, destWidth, destHeight, orgX + destX - startX, orgY, texture);
             }
         }
 
@@ -1205,6 +1227,7 @@ namespace dx::extension {
             UObject* texture = vm::get<UObject*>(stack);
             vm::finish(stack);
             if (UGC* gc = self(object)) {
+                gc->bleed(destX, destWidth);
                 gc->drawStretched(destX, destY, destWidth, destHeight, srcX, srcY, srcWidth, srcHeight, texture);
             }
         }

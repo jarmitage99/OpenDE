@@ -540,9 +540,13 @@ namespace dx::extension {
         void drawBorders(float destX, float destY, float destWidth, float destHeight, UObject* const* borders);
         void setStyle(uint8_t style);
         void setFonts(UObject* normal, UObject* bold);
+        void bleed(float& destX, float& destWidth);
 
         float offsetX = 0;
         float offsetY = 0;
+        float bleedLeft = 0;
+        float bleedRight = 0;
+        float bleedEdge = 0;
         float clipLeft = 0;
         float clipTop = 0;
         float clipRight = 0;

@@ -25,7 +25,7 @@ namespace dx::extension {
     public:
         void serialize(Reader& reader, Linker&) override
         {
-            extstring::Text(this) = reader.string();
+            *reinterpret_cast<std::string*>(propertyAddress(Name("Text"))) = reader.string();
         }
     };
 

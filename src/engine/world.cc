@@ -1185,7 +1185,12 @@ namespace dx {
         if (dilation <= 0) {
             dilation = 1;
         }
-        float delta = deltaSeconds * dilation;
+        float delta = deltaSeconds * dilation + pendingSeconds;
+        if (delta < 0.005f) {
+            pendingSeconds = delta;
+            return;
+        }
+        pendingSeconds = 0;
         timeSeconds += delta;
         levelinfo::TimeSeconds(levelInfo) = timeSeconds;
         std::time_t now = std::time(nullptr);

@@ -8,6 +8,8 @@
 #include <vector>
 
 namespace dx {
+    class RenderDevice;
+
     struct LightmapPlacement {
         int32_t page = -1;
         int32_t x = 0;
@@ -74,7 +76,7 @@ namespace dx {
 
     class LightmapAtlas {
     public:
-        explicit LightmapAtlas(int32_t size = 1024);
+        explicit LightmapAtlas(RenderDevice& renderDevice, int32_t size = 1024);
         ~LightmapAtlas();
         LightmapAtlas(const LightmapAtlas&) = delete;
         LightmapAtlas& operator=(const LightmapAtlas&) = delete;
@@ -111,6 +113,7 @@ namespace dx {
         void store(UModel* model, size_t surfIndex, const Vector& ambient, float time, const LightmapTransform& transform, const std::vector<UObject*>* lights, LightmapPlacement& placement, int32_t variant, std::vector<int32_t>* surfAnimated);
         const LightmapPlacement* placementFor(int32_t lightMap, int32_t zone) const;
 
+        RenderDevice& device;
         int32_t PageSize = 1024;
         bool isBuilt = false;
         std::vector<LightmapPlacement> placements;

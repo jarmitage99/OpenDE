@@ -6,6 +6,7 @@
 #include <glad/gl.h>
 
 #include <algorithm>
+#include <bit>
 #include <exception>
 #include <vector>
 
@@ -60,6 +61,12 @@ namespace dx {
         animations.clear();
         proceduralFrames.clear();
         procedural.clear();
+        replacements.rescan();
+    }
+
+    void TextureCache::resetProcedural(UTexture* texture)
+    {
+        procedural.reset(texture);
     }
 
     uint32_t TextureCache::white()
@@ -78,10 +85,10 @@ namespace dx {
         if (!texture || !texture->data || !texture::AnimNext(texture)) {
             return texture;
         }
-        return advance(texture, animations[texture], time);
+        return advance(texture, animations[texture], time, constantRate);
     }
 
-    UTexture* TextureCache::advance(UTexture* texture, TextureAnimation& animation, double now)
+    UTexture* TextureCache::advance(UTexture* texture, TextureAnimation& animation, double now, float constantRate)
     {
         auto constantTimeTick = [&]() {
             UTexture* from = animation.current ? animation.current : texture;
@@ -98,11 +105,16 @@ namespace dx {
                 constantTimeTick();
             }
             float maxRate = texture::MaxFrameRate(texture);
+            float minRate = texture::MinFrameRate(texture);
+            if (maxRate == 0.0f && constantRate > 0.0f) {
+                maxRate = constantRate;
+                minRate = constantRate;
+            }
             if (maxRate == 0.0f) {
                 constantTimeTick();
             } else {
                 float minTime = 1.0f / std::clamp(maxRate, 0.01f, 100.0f);
-                float maxTime = 1.0f / std::clamp(texture::MinFrameRate(texture), 0.01f, 100.0f);
+                float maxTime = 1.0f / std::clamp(minRate, 0.01f, 100.0f);
                 animation.accumulator += delta;
                 if (animation.accumulator >= minTime) {
                     constantTimeTick();
@@ -192,6 +204,9 @@ namespace dx {
         info.width = texture->width();
         info.height = texture->height();
         info.masked = masked;
+        if (uploadReplacement(texture, info)) {
+            return true;
+        }
         glGenTextures(1, &info.id);
         glBindTexture(GL_TEXTURE_2D, info.id);
         int32_t levels = 0;
@@ -235,6 +250,37 @@ namespace dx {
         info.levels = levels;
         setParameters(info.smooth, levels, trilinear, anisotropy);
         return true;
+    }
+
+    bool TextureCache::uploadReplacement(UTexture* texture, GLTextureInfo& info)
+    {
+        ReplacementImage image;
+        if (!replacements.load(texture, image)) {
+            return false;
+        }
+        if (info.masked) {
+            for (size_t i = 0; i < image.rgba.size(); i += 4) {
+                if (image.rgba[i + 3] == 0) {
+                    image.rgba[i + 0] = 0;
+                    image.rgba[i + 1] = 0;
+                    image.rgba[i + 2] = 0;
+                }
+            }
+        }
+        glGenTextures(1, &info.id);
+        glBindTexture(GL_TEXTURE_2D, info.id);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, static_cast<GLsizei>(image.width), static_cast<GLsizei>(image.height), 0, GL_RGBA, GL_UNSIGNED_BYTE, image.rgba.data());
+        glGenerateMipmap(GL_TEXTURE_2D);
+        info.smooth = !texture::bNoSmooth(texture);
+        info.levels = static_cast<int32_t>(std::bit_width(std::max(image.width, image.height)));
+        setParameters(info.smooth, info.levels, trilinear, anisotropy);
+        return true;
+    }
+
+    void TextureCache::setConstantRate(float rate)
+    {
+        constantRate = rate;
+        procedural.setConstantRate(rate);
     }
 
     void TextureCache::setFiltering(float newAnisotropy, bool newTrilinear)

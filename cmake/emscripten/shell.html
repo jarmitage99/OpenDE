@@ -6,86 +6,85 @@
 <title>OpenDE Demo</title>
 <style>
 :root {
-  --background: #1a1a1a;
-  --panel: #555858;
-  --border: #969999;
-  --text: #d9d9d9;
-  --muted: #6e7672;
-  --accent: #58b3d7;
+    --background: #0b0d10;
+    --panel: #15191f;
+    --border: #2a313b;
+    --text: #c9d1d9;
+    --muted: #8b949e;
+    --accent: #6ea8fe;
 }
 html, body {
-  margin: 0;
-  background: var(--background);
-  color: var(--text);
-  font-family: sans-serif;
-  font-size: 15px;
+    margin: 0;
+    background: var(--background);
+    color: var(--text);
+    font: 15px/1.5 system-ui, sans-serif;
 }
 main {
-  width: 800px;
-  margin: 24px auto;
+    width: 800px;
+    margin: 24px auto;
 }
 header h1 {
-  margin: 0;
-  font-size: 24px;
+    margin: 0;
+    font-size: 24px;
 }
 header p {
-  margin: 4px 0 16px;
-  color: var(--muted);
+    margin: 4px 0 16px;
+    color: var(--muted);
 }
 a {
-  color: var(--accent);
+    color: var(--accent);
 }
 #screen {
-  position: relative;
-  width: 800px;
-  height: 600px;
-  background: #000;
-  border: 1px solid var(--border);
+    position: relative;
+    width: 800px;
+    height: 600px;
+    background: #000;
+    border: 1px solid var(--border);
 }
 #canvas {
-  display: block;
-  outline: none;
+    display: block;
+    outline: none;
 }
 #status {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  width: 480px;
-  text-align: center;
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 480px;
+    text-align: center;
 }
 #progress {
-  width: 100%;
-  margin-top: 12px;
+    width: 100%;
+    margin-top: 12px;
 }
 .toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin: 12px 0;
-  color: var(--muted);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 12px 0;
+    color: var(--muted);
 }
 button {
-  padding: 6px 16px;
-  font: inherit;
-  color: var(--text);
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  cursor: pointer;
+    padding: 6px 16px;
+    font: inherit;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
 }
 button:disabled {
-  cursor: default;
-  opacity: 0.5;
+    cursor: default;
+    opacity: 0.5;
 }
 section {
-  padding: 4px 20px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+    padding: 4px 20px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
 }
 section h2 {
-  font-size: 17px;
+    font-size: 17px;
 }
 </style>
 </head>
@@ -93,23 +92,23 @@ section h2 {
 <main>
 <header>
 <h1>OpenDE</h1>
-<p>An open-source reimplementation of the Deus Ex engine</p>
+<p>An open-source reimplementation of the Deus Ex engine, running the shareware demo in your browser.</p>
 </header>
 <div id="screen">
 <canvas id="canvas" width="800" height="600" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
 <div id="status"><div id="message">Loading</div><progress id="progress" max="1" value="0"></progress></div>
 </div>
 <div class="toolbar">
-<span>Click the game window to capture the mouse.</span>
+<span>During play, click the game to capture the mouse.</span>
 <button id="fullscreen" disabled>Fullscreen</button>
 </div>
 <section>
 <h2>About</h2>
-<p>OpenDE runs UnrealScript bytecode from the shipped packages. This page is the same engine compiled to WebAssembly with Emscripten, using WebGL 2. It runs the shareware Deus Ex demo</p>
-<p>Report any issues on the repo: <a href="https://github.com/jarmitage99/OpenDE">github.com/jarmitage99/OpenDE</a></p>
+<p>OpenDE runs the original game's UnrealScript bytecode from the shipped packages on a new C++ engine. This page is the same engine compiled to WebAssembly with Emscripten, drawing with WebGL 2. It plays the Deus Ex demo (version 1002f), which includes the training mission, Liberty Island and UNATCO headquarters.</p>
+<p>Source code, build instructions and the issue tracker: <a href="https://github.com/jarmitage99/OpenDE">github.com/jarmitage99/OpenDE</a></p>
 <h2>Controls</h2>
-<p>WASD to move, LMB to fire, RMB to use. F1 opens the inventory and ESC the main menu.</p>
-<p>Settings and saved games are kept in browser storage.</p>
+<p>W A S D to move, mouse to look, left click to fire, right click to use. F1 opens the inventory and Escape the main menu. Keypad + quick saves and keypad / quick loads. In fullscreen, Escape returns to this page.</p>
+<p>Settings and saved games are kept in this browser's storage.</p>
 </section>
 </main>
 <script>

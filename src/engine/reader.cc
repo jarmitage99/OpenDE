@@ -1,7 +1,9 @@
 #include "engine/reader.h"
 
+#include <algorithm>
 #include <cstring>
 #include <stdexcept>
+#include <vector>
 
 namespace dx {
     Reader::Reader(std::span<const uint8_t> data, size_t offset)
@@ -88,7 +90,33 @@ namespace dx {
     std::string Reader::string()
     {
         int32_t length = index();
-        if (length <= 0) {
+        if (length < 0) {
+            std::vector<uint16_t> units(static_cast<size_t>(-static_cast<int64_t>(length)));
+            for (uint16_t& unit : units) {
+                unit = static_cast<uint16_t>(i16());
+            }
+            while (!units.empty() && units.back() == 0) {
+                units.pop_back();
+            }
+            bool wide = std::any_of(units.begin(), units.end(), [](uint16_t unit) {
+                return unit > 0xff;
+            });
+            std::string result;
+            for (uint16_t unit : units) {
+                if (!wide || unit < 0x80) {
+                    result.push_back(static_cast<char>(unit));
+                } else if (unit < 0x800) {
+                    result.push_back(static_cast<char>(0xc0 | (unit >> 6)));
+                    result.push_back(static_cast<char>(0x80 | (unit & 0x3f)));
+                } else {
+                    result.push_back(static_cast<char>(0xe0 | (unit >> 12)));
+                    result.push_back(static_cast<char>(0x80 | ((unit >> 6) & 0x3f)));
+                    result.push_back(static_cast<char>(0x80 | (unit & 0x3f)));
+                }
+            }
+            return result;
+        }
+        if (length == 0) {
             return {};
         }
         std::string result(static_cast<size_t>(length), '\0');

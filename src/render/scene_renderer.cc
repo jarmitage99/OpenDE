@@ -4,9 +4,8 @@
 #include "engine/mesh.h"
 #include "engine/props_engine.h"
 #include "engine/world.h"
+#include "render/gl_device.h"
 #include "render/lighting.h"
-
-#include <glad/gl.h>
 
 #include <algorithm>
 #include <bit>
@@ -19,6 +18,7 @@
 namespace dx {
     namespace {
         constexpr float sceneNearPlane = 4.0f;
+        constexpr float sceneFarPlane = 65536.0f;
         constexpr float overlayNearPlane = 1.0f;
         const Name nameActor("Actor");
         const Name nameDecal("Decal");
@@ -245,12 +245,9 @@ namespace dx {
     }
 
     SceneRenderer::SceneRenderer()
+        : device(std::make_unique<GLRenderDevice>())
+        , lightmaps(*device)
     {
-        shader = std::make_unique<UberShader>();
-        gammaPass = std::make_unique<GammaPass>();
-        scenePass = std::make_unique<ScenePass>();
-        textures = std::make_unique<TextureCache>();
-        canvasImpl = std::make_unique<GLCanvas>(*shader, *textures);
         startTime = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count()) / 1e6;
     }
 
@@ -270,24 +267,31 @@ namespace dx {
         viewportTime = seconds;
     }
 
+    void SceneRenderer::setRenderMode(RenderMode mode)
+    {
+        renderMode = mode;
+    }
+
     void SceneRenderer::flushLevel()
     {
         if (levelData.vao) {
-            glDeleteVertexArrays(1, &levelData.vao);
-            glDeleteBuffers(1, &levelData.vbo);
+            device->deleteStatic(levelData.vao);
         }
         if (levelData.detailVao) {
-            glDeleteVertexArrays(1, &levelData.detailVao);
-            glDeleteBuffers(1, &levelData.detailVbo);
+            device->deleteStatic(levelData.detailVao);
         }
         if (levelData.mirrorVao) {
-            glDeleteVertexArrays(1, &levelData.mirrorVao);
-            glDeleteBuffers(1, &levelData.mirrorVbo);
+            device->deleteStatic(levelData.mirrorVao);
+        }
+        for (size_t i = 0; i < 2; i++) {
+            if (levelData.flatVaos[i]) {
+                device->deleteStatic(levelData.flatVaos[i]);
+            }
         }
         levelData = LevelData {};
         touchedBatches.clear();
-        canvasImpl->flush();
-        textures->clear();
+        device->flushCanvas();
+        device->clearTextures();
         lightmaps.clear();
         triangleCache.clear();
         poseCaches.clear();
@@ -296,7 +300,7 @@ namespace dx {
         actorLightCache.clear();
         for (auto& [actor, state] : occlusion) {
             if (state.query) {
-                glDeleteQueries(1, &state.query);
+                device->deleteQuery(state.query);
             }
         }
         occlusion.clear();
@@ -304,7 +308,7 @@ namespace dx {
 
     Canvas2D& SceneRenderer::canvas()
     {
-        return *canvasImpl;
+        return device->canvas();
     }
 
     void SceneRenderer::beginFrame(int width, int height)
@@ -321,61 +325,56 @@ namespace dx {
         frameWidth = std::max(width, 1);
         frameHeight = std::max(height, 1);
         viewAspect = static_cast<float>(frameWidth) / static_cast<float>(frameHeight);
-        textures->beginFrame(currentTime);
-        GLint boundFramebuffer = 0;
-        glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &boundFramebuffer);
-        offscreen = boundFramebuffer == 0 && std::abs(gammaExponent - 1.0f) >= 0.0001f;
+        device->beginTextureFrame(currentTime);
+        offscreen = device->drawingToWindow() && std::abs(gammaExponent - 1.0f) >= 0.0001f;
         if (offscreen) {
-            gammaPass->bindTarget(frameWidth, frameHeight);
+            device->bindGammaTarget(frameWidth, frameHeight);
         }
-        glViewport(0, 0, frameWidth, frameHeight);
-        glDepthMask(GL_TRUE);
-        glClearColor(0, 0, 0, 1);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        canvasImpl->begin(frameWidth, frameHeight);
+        device->setViewport(0, 0, frameWidth, frameHeight);
+        device->setDepthWrite(true);
+        device->clear(true, true, 1.0f);
+        device->beginCanvas(frameWidth, frameHeight);
     }
 
     void SceneRenderer::endFrame()
     {
-        canvasImpl->flush();
-        glDepthMask(GL_TRUE);
-        glDisable(GL_BLEND);
+        device->flushCanvas();
+        device->setBlend(BlendMode::Opaque);
     }
 
     void SceneRenderer::applyBrightness(float brightness)
     {
         float exponent = 1.0f / (2.5f * std::max(brightness, 0.01f));
         gammaExponent = exponent;
-        canvasImpl->flush();
+        device->flushCanvas();
         if (offscreen) {
             offscreen = false;
-            gammaPass->resolve(frameWidth, frameHeight, exponent);
+            device->resolveGamma(frameWidth, frameHeight, exponent);
             return;
         }
         if (std::abs(exponent - 1.0f) < 0.0001f) {
             return;
         }
-        gammaPass->apply(frameWidth, frameHeight, exponent);
+        device->applyGamma(frameWidth, frameHeight, exponent);
     }
 
     void SceneRenderer::setOptions(const RenderOptions& newOptions)
     {
-        textures->setFiltering(newOptions.anisotropy, newOptions.trilinear);
+        device->setTextureOptions(newOptions.anisotropy, newOptions.trilinear, newOptions.textureRate);
         if (newOptions.smoothLightmaps != options.smoothLightmaps || newOptions.detailDistance != options.detailDistance) {
-            shader->setQuality(newOptions.smoothLightmaps, newOptions.detailDistance);
+            device->setQuality(newOptions.smoothLightmaps, newOptions.detailDistance);
         }
         options = newOptions;
     }
 
     void SceneRenderer::readPixels(std::vector<uint8_t>& rgba, int& width, int& height)
     {
-        canvasImpl->flush();
+        device->flushCanvas();
         width = frameWidth;
         height = frameHeight;
         rgba.resize(static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
         std::vector<uint8_t> raw(rgba.size());
-        glPixelStorei(GL_PACK_ALIGNMENT, 1);
-        glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, raw.data());
+        device->readPixels(width, height, raw.data());
         size_t stride = static_cast<size_t>(width) * 4;
         for (size_t y = 0; y < static_cast<size_t>(height); y++) {
             std::copy_n(raw.data() + y * stride, stride, rgba.data() + (static_cast<size_t>(height) - 1 - y) * stride);
@@ -398,7 +397,7 @@ namespace dx {
         float aspect = viewAspect;
         view.tanHalfWidth = std::tan(fov * Pi / 360.0f);
         view.tanHalfHeight = view.tanHalfWidth / aspect;
-        view.viewProj = mat4Multiply(projectionMatrix(fov, aspect, nearPlane, 65536.0f), viewMatrix(location, axes));
+        view.viewProj = mat4Multiply(projectionMatrix(fov, aspect, nearPlane, sceneFarPlane), viewMatrix(location, axes));
         return view;
     }
 
@@ -1104,10 +1103,36 @@ namespace dx {
             levelData.batches.push_back(batch);
         }
         if (!all.empty()) {
-            levelData.vao = shader->createStatic(all, levelData.vbo);
+            levelData.vao = device->createStatic(all);
+        }
+        levelData.vertices = all;
+        for (const BspNode& node : model->nodes) {
+            if (node.numVertices < 3 || node.surf < 0 || static_cast<size_t>(node.surf) >= model->surfs.size()) {
+                continue;
+            }
+            std::vector<GLVertex> polygon;
+            for (uint8_t i = 0; i < node.numVertices; i++) {
+                const Vector& point = model->points.at(static_cast<size_t>(model->verts.at(static_cast<size_t>(node.vertPool) + i).vertex));
+                GLVertex vertex;
+                vertex.x = point.x;
+                vertex.y = point.y;
+                vertex.z = point.z;
+                polygon.push_back(vertex);
+            }
+            for (size_t i = 0; i < polygon.size(); i++) {
+                levelData.wireVertices.push_back(polygon[i]);
+                levelData.wireVertices.push_back(polygon[(i + 1) % polygon.size()]);
+            }
+            if (model->surfs[static_cast<size_t>(node.surf)].polyFlags & PF_Portal) {
+                for (size_t i = 1; i + 1 < polygon.size(); i++) {
+                    levelData.portalVertices.push_back(polygon[0]);
+                    levelData.portalVertices.push_back(polygon[i]);
+                    levelData.portalVertices.push_back(polygon[i + 1]);
+                }
+            }
         }
         if (!detailVertices.empty()) {
-            levelData.detailVao = shader->createStatic(detailVertices, levelData.detailVbo);
+            levelData.detailVao = device->createStatic(detailVertices);
         }
         levelData.nodeEmitStart.assign(model->nodes.size() + 1, 0);
         for (const Batch& batch : levelData.batches) {
@@ -1186,28 +1211,31 @@ namespace dx {
             levelData.nodeMirror[static_cast<size_t>(node)] = mirrorIndex[key];
         }
         if (!mirrorVertices.empty()) {
-            levelData.mirrorVao = shader->createStatic(mirrorVertices, levelData.mirrorVbo);
+            levelData.mirrorVao = device->createStatic(mirrorVertices);
         }
     }
 
     void SceneRenderer::applyBlend(uint32_t polyFlags, int32_t extraFlags)
     {
         int32_t flags = SHADER_Textured | extraFlags;
+        if (renderMode == RenderMode::Unlit) {
+            flags = (flags | SHADER_Fullbright) & ~(SHADER_Lightmap | SHADER_Dynamic);
+        }
         if (polyFlags & PF_Translucent) {
-            shader->setBlend(BlendMode::Translucent);
+            device->setBlend(BlendMode::Translucent);
         } else if (polyFlags & PF_Modulated) {
-            shader->setBlend(BlendMode::Modulated);
+            device->setBlend(BlendMode::Modulated);
         } else if (polyFlags & PF_Masked) {
-            shader->setBlend(BlendMode::Masked);
+            device->setBlend(BlendMode::Masked);
             flags |= SHADER_AlphaTest;
         } else {
-            shader->setBlend(BlendMode::Opaque);
+            device->setBlend(BlendMode::Opaque);
         }
-        shader->setFlags(flags);
+        device->setFlags(flags);
         if (polyFlags & PF_TwoSided) {
-            glDisable(GL_CULL_FACE);
+            device->setCulling(false);
         } else {
-            glEnable(GL_CULL_FACE);
+            device->setCulling(true);
         }
     }
 
@@ -1216,14 +1244,14 @@ namespace dx {
         if (!levelData.vao) {
             return;
         }
-        shader->use();
-        shader->setViewProj(view.viewProj);
-        shader->setTint(1, 1, 1, 1);
+        device->useShader();
+        device->setViewProj(view.viewProj);
+        device->setTint(1, 1, 1, 1);
         uint32_t uploadedLights = ~0u;
-        glEnable(GL_DEPTH_TEST);
-        glDepthFunc(GL_LEQUAL);
-        glFrontFace(view.mirrored ? GL_CCW : GL_CW);
-        shader->bindStatic(levelData.vao);
+        device->setDepthTest(true);
+        device->setDepthFunc(DepthFunc::LessEqual);
+        device->setFrontFace(!view.mirrored);
+        device->bindStatic(levelData.vao);
         if (!translucentPass) {
             gatherVisible(view);
             lightmaps.animate(levelData.model, static_cast<float>(time), static_cast<uint64_t>(lightFrameCount), [&](size_t surf, uint64_t zones) {
@@ -1255,10 +1283,9 @@ namespace dx {
             for (const TranslucentSurface& surface : surfaces) {
                 drawBatch(*surface.batch, view, &surface.first, &surface.count, 1, surface.node, uploadedLights);
             }
-            shader->setPan(0, 0);
-            shader->setScale(1, 1);
-            glDepthMask(GL_TRUE);
-            glDisable(GL_BLEND);
+            device->setPan(0, 0);
+            device->setScale(1, 1);
+            device->setBlend(BlendMode::Opaque);
             return;
         }
         auto collectRanges = [&](int32_t index) {
@@ -1276,23 +1303,23 @@ namespace dx {
             }
         };
         if (mirrorsActive && !levelData.mirrors.empty()) {
-            shader->setBlend(BlendMode::Opaque);
-            shader->setFlags(0);
-            glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+            device->setBlend(BlendMode::Opaque);
+            device->setFlags(0);
+            device->setColorWrite(false);
             for (int32_t index : touchedBatches) {
                 const Batch& batch = levelData.batches[static_cast<size_t>(index)];
                 if (!(batch.polyFlags & PF_Mirrored) || !(view.zoneMask & (1ull << (batch.zone & 63)))) {
                     continue;
                 }
                 if (batch.polyFlags & PF_TwoSided) {
-                    glDisable(GL_CULL_FACE);
+                    device->setCulling(false);
                 } else {
-                    glEnable(GL_CULL_FACE);
+                    device->setCulling(true);
                 }
                 collectRanges(index);
-                shader->drawStaticRanges(levelData.vao, scratchFirsts.data(), scratchCounts.data(), static_cast<int32_t>(scratchFirsts.size()));
+                device->drawStaticRanges(levelData.vao, scratchFirsts.data(), scratchCounts.data(), static_cast<int32_t>(scratchFirsts.size()));
             }
-            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+            device->setColorWrite(true);
         }
         for (int32_t index : touchedBatches) {
             const Batch& batch = levelData.batches[static_cast<size_t>(index)];
@@ -1305,21 +1332,22 @@ namespace dx {
             collectRanges(index);
             drawBatch(batch, view, scratchFirsts.data(), scratchCounts.data(), static_cast<int32_t>(scratchFirsts.size()), -1, uploadedLights);
         }
-        shader->setPan(0, 0);
-        shader->setScale(1, 1);
-        glDepthMask(GL_TRUE);
-        glDisable(GL_BLEND);
+        device->setPan(0, 0);
+        device->setScale(1, 1);
+        device->setBlend(BlendMode::Opaque);
     }
 
     void SceneRenderer::drawBatch(const Batch& batch, const View& view, const int32_t* firsts, const int32_t* counts, int32_t ranges, int32_t onlyNode, uint32_t& uploadedLights)
     {
         bool backdropMask = (batch.polyFlags & PF_FakeBackdrop) && levelData.hasBackdrop;
         UTexture* matrix = matrixTexture(World::current ? World::current->player() : nullptr);
-        UTexture* texture = textures->animated(matrix ? matrix : batch.texture);
-        const GLTextureInfo* info = textures->get(texture);
-        uint32_t textureId = info ? info->id : textures->white();
+        UTexture* texture = device->animated(matrix ? matrix : batch.texture);
+        bool flat = renderMode == RenderMode::ZonePortal || renderMode == RenderMode::BspCuts;
+        uint32_t geometry = flat ? flatVao() : levelData.vao;
+        const GLTextureInfo* info = device->texture(texture);
+        uint32_t textureId = info && !flat && renderMode != RenderMode::LightingOnly ? info->id : device->whiteTexture();
         int32_t extra = 0;
-        bool batchUnlit = (batch.polyFlags & (PF_Unlit | PF_Modulated)) != 0;
+        bool batchUnlit = flat || (batch.polyFlags & (PF_Unlit | PF_Modulated)) != 0;
         uint32_t lightMask = batchUnlit ? 0u : litMask(batch.boundsMin, batch.boundsMax, (batch.polyFlags & PF_SpecialLit) != 0);
         if (lightMask) {
             extra |= SHADER_Dynamic;
@@ -1330,15 +1358,16 @@ namespace dx {
                         batchLights.push_back(dynamicLights[i]);
                     }
                 }
-                shader->setDynamicLights(batchLights);
+                device->setDynamicLights(batchLights);
                 uploadedLights = lightMask;
             }
         }
-        if (batch.lightmapPage >= 0) {
+        if (batch.lightmapPage >= 0 && !flat) {
             extra |= SHADER_Lightmap;
-            shader->bindLightmap(lightmaps.texture(batch.lightmapPage));
+            device->bindLightmap(lightmaps.texture(batch.lightmapPage));
         }
-        applyBlend(batch.polyFlags, extra);
+        device->setOcclusionSource(batchUnlit ? OcclusionSource::None : OcclusionSource::World);
+        applyBlend(flat ? batch.polyFlags & PF_TwoSided : batch.polyFlags, extra);
         float panU = 0;
         float panV = 0;
         float levelTime = static_cast<float>(time);
@@ -1364,53 +1393,49 @@ namespace dx {
             uSize = static_cast<float>(info->width) * matrixScale;
             vSize = static_cast<float>(info->height) * matrixScale;
         }
-        shader->setScale(batch.uSize / uSize, batch.vSize / vSize);
-        shader->setPan(panU / uSize, panV / vSize);
-        shader->bindTexture(textureId);
+        device->setScale(batch.uSize / uSize, batch.vSize / vSize);
+        device->setPan(panU / uSize, panV / vSize);
+        device->bindTexture(textureId);
         if (backdropMask) {
-            shader->setBlend(BlendMode::Opaque);
-            shader->setFlags(0);
-            glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-            shader->drawStaticRanges(levelData.vao, firsts, counts, ranges);
-            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+            device->setBlend(BlendMode::Opaque);
+            device->setFlags(0);
+            device->setColorWrite(false);
+            device->drawStaticRanges(geometry, firsts, counts, ranges);
+            device->setColorWrite(true);
             return;
         }
-        if ((batch.polyFlags & PF_Translucent) && batch.lightmapPage >= 0) {
+        if ((batch.polyFlags & PF_Translucent) && (extra & SHADER_Lightmap) && renderMode != RenderMode::Unlit) {
             applyBlend(batch.polyFlags, 0);
-            shader->drawStaticRanges(levelData.vao, firsts, counts, ranges);
-            shader->setBlend(BlendMode::Modulated);
-            shader->setFlags(extra);
-            shader->setTint(0.5f, 0.5f, 0.5f, 1);
-            shader->drawStaticRanges(levelData.vao, firsts, counts, ranges);
-            shader->setTint(1, 1, 1, 1);
+            device->drawStaticRanges(geometry, firsts, counts, ranges);
+            device->setBlend(BlendMode::Modulated);
+            device->setFlags(extra);
+            device->setTint(0.5f, 0.5f, 0.5f, 1);
+            device->drawStaticRanges(geometry, firsts, counts, ranges);
+            device->setTint(1, 1, 1, 1);
         } else {
-            shader->drawStaticRanges(levelData.vao, firsts, counts, ranges);
+            device->drawStaticRanges(geometry, firsts, counts, ranges);
         }
-        shader->setScale(1, 1);
-        drawFog(batch, view, onlyNode);
-        drawDetail(batch, view, onlyNode);
+        device->setScale(1, 1);
+        if (renderMode == RenderMode::Textured) {
+            drawFog(batch, view, onlyNode);
+            drawDetail(batch, view, onlyNode);
+        }
     }
 
     void SceneRenderer::applyClip(const View& view)
     {
-#ifndef __EMSCRIPTEN__
-        for (int32_t i = 0; i < 8; i++) {
-            if (i < view.clipCount) {
-                glEnable(static_cast<GLenum>(GL_CLIP_DISTANCE0 + i));
-            } else {
-                glDisable(static_cast<GLenum>(GL_CLIP_DISTANCE0 + i));
-            }
-        }
-#endif
-        shader->setClipPlanes(&view.clipPlanes[0].x, view.clipCount);
+        device->setClipPlanes(&view.clipPlanes[0].x, view.clipCount);
     }
 
     void SceneRenderer::drawFrameContent(const View& view, const std::vector<UObject*>& actors, UObject* viewActor, bool occlude)
     {
-        shader->use();
+        device->useShader();
         applyClip(view);
         drawLevelGeometry(view, false);
         drawActors(actors, view, viewActor, occlude);
+        if (view.recursion == 0) {
+            device->applyOcclusion(sceneNearPlane, sceneFarPlane, view.tanHalfWidth, view.tanHalfHeight);
+        }
         flushTranslucent(view);
         drawLevelGeometry(view, true);
         if (view.clipCount) {
@@ -1440,6 +1465,7 @@ namespace dx {
         sky.mirrored = frame.mirrored;
         sky.recursion = frame.recursion + 1;
         occludeView(sky, &frame.visibility->backdropSpans);
+        device->useShader();
         View plain;
         applyClip(plain);
         drawLevelGeometry(sky, false);
@@ -1450,24 +1476,22 @@ namespace dx {
 
     void SceneRenderer::markMirror(const View& view, const MirrorSurface& mirror)
     {
-        shader->use();
-        shader->setViewProj(view.viewProj);
+        device->useShader();
+        device->setViewProj(view.viewProj);
         applyClip(view);
-        shader->setBlend(BlendMode::Opaque);
-        shader->setFlags(0);
-        glDepthMask(GL_TRUE);
-        glClearDepth(0.0);
-        glClear(GL_DEPTH_BUFFER_BIT);
-        glClearDepth(1.0);
-        glEnable(GL_DEPTH_TEST);
-        glDepthFunc(GL_ALWAYS);
-        glDepthRange(1.0, 1.0);
-        glDisable(GL_CULL_FACE);
-        glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-        shader->drawStatic(levelData.mirrorVao, mirror.first, mirror.count);
-        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-        glDepthRange(0.0, 1.0);
-        glDepthFunc(GL_LEQUAL);
+        device->setBlend(BlendMode::Opaque);
+        device->setFlags(0);
+        device->setDepthWrite(true);
+        device->clear(false, true, 0.0f);
+        device->setDepthTest(true);
+        device->setDepthFunc(DepthFunc::Always);
+        device->setDepthRange(1.0f, 1.0f);
+        device->setCulling(false);
+        device->setColorWrite(false);
+        device->drawStatic(levelData.mirrorVao, mirror.first, mirror.count);
+        device->setColorWrite(true);
+        device->setDepthRange(0.0f, 1.0f);
+        device->setDepthFunc(DepthFunc::LessEqual);
     }
 
     void SceneRenderer::drawMirrors(const View& view, const std::vector<UObject*>& actors)
@@ -1772,18 +1796,18 @@ namespace dx {
                 continue;
             }
             if (!started) {
-                shader->setBlend(BlendMode::Highlight);
-                shader->setFlags(SHADER_Fog);
-                shader->bindLightmap(lightmaps.fogTexture(batch.lightmapPage));
+                device->setBlend(BlendMode::Highlight);
+                device->setFlags(SHADER_Fog);
+                device->bindLightmap(lightmaps.fogTexture(batch.lightmapPage));
                 if (batch.polyFlags & PF_Masked) {
-                    glDepthFunc(GL_EQUAL);
+                    device->setDepthFunc(DepthFunc::Equal);
                 }
                 started = true;
             }
-            shader->drawStatic(levelData.vao, first, count);
+            device->drawStatic(levelData.vao, first, count);
         }
         if (started) {
-            glDepthFunc(GL_LEQUAL);
+            device->setDepthFunc(DepthFunc::LessEqual);
         }
     }
 
@@ -1797,7 +1821,7 @@ namespace dx {
         if ((nearest - view.location).dot(forward) >= options.detailDistance) {
             return;
         }
-        const GLTextureInfo* info = textures->get(textures->animated(batch.detail));
+        const GLTextureInfo* info = device->texture(device->animated(batch.detail));
         if (!info) {
             return;
         }
@@ -1820,19 +1844,18 @@ namespace dx {
                 continue;
             }
             if (!started) {
-                shader->setBlend(BlendMode::Modulated);
-                shader->setFlags(SHADER_Detail);
-                shader->setPan(0, 0);
-                shader->setEye(view.location, forward);
-                shader->bindTexture(info->id);
-                glEnable(GL_POLYGON_OFFSET_FILL);
-                glPolygonOffset(-1.0f, -1.0f);
+                device->setBlend(BlendMode::Modulated);
+                device->setFlags(SHADER_Detail);
+                device->setPan(0, 0);
+                device->setEye(view.location, forward);
+                device->bindTexture(info->id);
+                device->setPolygonOffset(true, -1.0f, -1.0f);
                 started = true;
             }
-            shader->drawStatic(levelData.detailVao, first, count);
+            device->drawStatic(levelData.detailVao, first, count);
         }
         if (started) {
-            glDisable(GL_POLYGON_OFFSET_FILL);
+            device->setPolygonOffset(false, 0.0f, 0.0f);
         }
     }
 
@@ -2181,14 +2204,14 @@ namespace dx {
             float screenX = delta3.dot(view.axes.yAxis) * projection / depth + halfWidth + static_cast<float>(x);
             float screenY = -delta3.dot(view.axes.zAxis) * projection / depth + halfHeight + static_cast<float>(y);
             if (UTexture* spriteTexture = asTexture(sprite)) {
-                UTexture* frame = textures->animated(spriteTexture);
+                UTexture* frame = device->animated(spriteTexture);
                 actor::Skin(light) = frame ? frame : spriteTexture;
             }
             UTexture* skin = asTexture(actor::Skin(light));
             if (!skin) {
                 continue;
             }
-            canvasImpl->drawTile(skin, screenX - scale * 0.5f, screenY - scale * 0.5f, scale, scale, 0, 0, static_cast<float>(skin->width()), static_cast<float>(skin->height()), { color.x, color.y, color.z, 1 }, BlendStyle::Translucent, true);
+            device->canvas().drawTile(skin, screenX - scale * 0.5f, screenY - scale * 0.5f, scale, scale, 0, 0, static_cast<float>(skin->width()), static_cast<float>(skin->height()), { color.x, color.y, color.z, 1 }, BlendStyle::Translucent, true);
         }
     }
 
@@ -2298,8 +2321,7 @@ namespace dx {
             drawGroup(item.flags, item.texture, item.extra, item.vertices);
         }
         translucentCount = 0;
-        glDepthMask(GL_TRUE);
-        glDisable(GL_BLEND);
+        device->setBlend(BlendMode::Opaque);
     }
 
     void SceneRenderer::flushMeshBatches()
@@ -2312,11 +2334,11 @@ namespace dx {
         if (vertices.empty()) {
             return;
         }
-        if (!extra.lightmap) {
+        if (!extra.lightmap || renderMode == RenderMode::Unlit) {
             applyBlend(flags, 0);
-            glDisable(GL_CULL_FACE);
-            shader->bindTexture(texture);
-            shader->draw(vertices, GL_TRIANGLES);
+            device->setCulling(false);
+            device->bindTexture(renderMode == RenderMode::LightingOnly ? device->whiteTexture() : texture);
+            device->draw(vertices, Primitive::Triangles);
             return;
         }
         int32_t shaderFlags = SHADER_Lightmap;
@@ -2328,32 +2350,32 @@ namespace dx {
                     batchLights.push_back(dynamicLights[i]);
                 }
             }
-            shader->setDynamicLights(batchLights);
+            device->setDynamicLights(batchLights);
         }
-        shader->bindLightmap(extra.lightmap);
-        shader->bindTexture(texture);
+        device->bindLightmap(extra.lightmap);
+        device->bindTexture(renderMode == RenderMode::LightingOnly ? device->whiteTexture() : texture);
         if (flags & PF_Translucent) {
             applyBlend(flags, 0);
             if (extra.cull) {
-                glEnable(GL_CULL_FACE);
+                device->setCulling(true);
             } else {
-                glDisable(GL_CULL_FACE);
+                device->setCulling(false);
             }
-            shader->draw(vertices, GL_TRIANGLES);
-            shader->setBlend(BlendMode::Modulated);
-            shader->setFlags(shaderFlags);
-            shader->setTint(0.5f, 0.5f, 0.5f, 1);
-            shader->draw(vertices, GL_TRIANGLES);
-            shader->setTint(1, 1, 1, 1);
+            device->draw(vertices, Primitive::Triangles);
+            device->setBlend(BlendMode::Modulated);
+            device->setFlags(shaderFlags);
+            device->setTint(0.5f, 0.5f, 0.5f, 1);
+            device->draw(vertices, Primitive::Triangles);
+            device->setTint(1, 1, 1, 1);
             return;
         }
         applyBlend(flags, shaderFlags);
         if (extra.cull) {
-            glEnable(GL_CULL_FACE);
+            device->setCulling(true);
         } else {
-            glDisable(GL_CULL_FACE);
+            device->setCulling(false);
         }
-        shader->draw(vertices, GL_TRIANGLES);
+        device->draw(vertices, Primitive::Triangles);
     }
 
     void SceneRenderer::flushBatches(std::unordered_map<uint64_t, std::vector<GLVertex>>& batches)
@@ -2362,8 +2384,7 @@ namespace dx {
             drawGroup(meshBatchFlags[key], meshBatchTextures[key], meshBatchExtras[key], vertices);
             vertices.clear();
         }
-        glDepthMask(GL_TRUE);
-        glDisable(GL_BLEND);
+        device->setBlend(BlendMode::Opaque);
     }
 
     bool SceneRenderer::sameLights(const LightState& state) const
@@ -2626,9 +2647,9 @@ namespace dx {
         slotInfo.assign(skins.size(), nullptr);
         slotFlags.assign(skins.size(), 0);
         for (size_t i = 0; i < skins.size(); i++) {
-            UTexture* texture = textures->animated(skins[i]);
+            UTexture* texture = device->animated(skins[i]);
             if (texture) {
-                slotInfo[i] = textures->get(texture);
+                slotInfo[i] = device->texture(texture);
                 slotFlags[i] = textureFlags(texture) & (PF_Masked | PF_Unlit);
             }
         }
@@ -2759,14 +2780,14 @@ namespace dx {
         if (!texture) {
             return;
         }
-        texture = actor::DrawType(actor) == DT_SpriteAnimOnce ? spriteAnimOnceFrame(actor, texture) : textures->animated(texture);
+        texture = actor::DrawType(actor) == DT_SpriteAnimOnce ? spriteAnimOnceFrame(actor, texture) : device->animated(texture);
         if (!texture || actor::Style(actor) == STY_None) {
             return;
         }
         UTexture* matrix = matrixTexture(World::current ? World::current->player() : nullptr);
-        UTexture* drawn = matrix ? textures->animated(matrix) : texture;
+        UTexture* drawn = matrix ? device->animated(matrix) : texture;
         uint32_t flags = styleFlags(actor) | (textureFlags(drawn) & (PF_Masked | PF_Translucent | PF_Modulated));
-        const GLTextureInfo* info = textures->get(drawn);
+        const GLTextureInfo* info = device->texture(drawn);
         if (!info) {
             return;
         }
@@ -2803,12 +2824,12 @@ namespace dx {
             queueTranslucent(flags & (PF_Translucent | PF_Modulated | PF_Masked), info->id, {}, vertices);
             return;
         }
+        device->setOcclusionSource(OcclusionSource::None);
         applyBlend(flags, 0);
-        glDisable(GL_CULL_FACE);
-        shader->bindTexture(info->id);
-        shader->draw(vertices, GL_TRIANGLES);
-        glDepthMask(GL_TRUE);
-        glDisable(GL_BLEND);
+        device->setCulling(false);
+        device->bindTexture(info->id);
+        device->draw(vertices, Primitive::Triangles);
+        device->setBlend(BlendMode::Opaque);
     }
 
     void SceneRenderer::drawMoverSurfaces(UObject* actor, UModel* brush)
@@ -2853,7 +2874,7 @@ namespace dx {
         bool dynamicMover = actor->isA(nameMover) && mover::bDynamicLightMover(actor);
         const std::vector<Poly>& polys = brush->polys->polys;
         if (!cache.atlas) {
-            cache.atlas = std::make_shared<LightmapAtlas>(256);
+            cache.atlas = std::make_shared<LightmapAtlas>(*device, 256);
         }
         std::vector<Vector> surfAmbient;
         if (moved || !cache.atlas->built()) {
@@ -2920,7 +2941,7 @@ namespace dx {
                 if (flags & (PF_Invisible | PF_Portal)) {
                     continue;
                 }
-                const GLTextureInfo* info = textures->get(textures->animated(texture));
+                const GLTextureInfo* info = device->texture(device->animated(texture));
                 float texWidth = texture && texture->width() ? static_cast<float>(texture->width()) : 64.0f;
                 float texHeight = texture && texture->height() ? static_cast<float>(texture->height()) : 64.0f;
                 float drawScale = texture && texture->data && texture::DrawScale(texture) > 0 ? texture::DrawScale(texture) : 1.0f;
@@ -2953,7 +2974,7 @@ namespace dx {
                     }
                     polygon.push_back(vertex);
                 }
-                uint32_t textureId = info ? info->id : textures->white();
+                uint32_t textureId = info ? info->id : device->whiteTexture();
                 uint32_t lightmapId = page >= 0 ? cache.atlas->texture(page) : 0;
                 bool translucent = isTranslucentFlags(flags);
                 uint32_t mode = translucent ? ((flags & PF_Translucent) ? 1u : 2u) : ((flags & PF_Masked) ? 3u : 0u);
@@ -3048,12 +3069,12 @@ namespace dx {
             if (poly.vertices.size() < 3) {
                 continue;
             }
-            UTexture* texture = textures->animated(matrix ? matrix : asTexture(poly.texture));
+            UTexture* texture = device->animated(matrix ? matrix : asTexture(poly.texture));
             polyFlags[i] = poly.polyFlags | textureFlags(texture);
             if (polyFlags[i] & (PF_Invisible | PF_Portal)) {
                 continue;
             }
-            polyInfo[i] = textures->get(texture);
+            polyInfo[i] = device->texture(texture);
         }
 
         bool cacheable = true;
@@ -3100,7 +3121,7 @@ namespace dx {
             const GLTextureInfo* info = polyInfo[polyNumber];
             float width = info ? static_cast<float>(info->width) : 64.0f;
             float height = info ? static_cast<float>(info->height) : 64.0f;
-            UTexture* texture = textures->animated(matrix ? matrix : asTexture(poly.texture));
+            UTexture* texture = device->animated(matrix ? matrix : asTexture(poly.texture));
             float drawScale = texture && texture->data ? std::max(texture::DrawScale(texture), 0.01f) : 1.0f;
             Vector normal = untransformVector(rotation, poly.normal * Vector { 1.0f / scale.x, 1.0f / scale.y, 1.0f / scale.z }).normal();
             bool translucent = isTranslucentFlags(flags);
@@ -3121,7 +3142,7 @@ namespace dx {
                 vertex.b = color.z;
                 polygon.push_back(vertex);
             }
-            uint32_t textureId = info ? info->id : textures->white();
+            uint32_t textureId = info ? info->id : device->whiteTexture();
             uint32_t mode = translucent ? ((flags & PF_Translucent) ? 1u : 2u) : ((flags & PF_Masked) ? 3u : 0u);
             uint64_t key = (static_cast<uint64_t>(textureId) << 8) | mode;
             auto found = groupIndex.find(key);
@@ -3162,8 +3183,8 @@ namespace dx {
         if (UTexture* matrix = matrixTexture(world->player())) {
             texture = matrix;
         }
-        texture = textures->animated(texture);
-        const GLTextureInfo* info = textures->get(texture);
+        texture = device->animated(texture);
+        const GLTextureInfo* info = device->texture(texture);
         if (!info) {
             return;
         }
@@ -3215,12 +3236,11 @@ namespace dx {
             decal::LastRenderedTime(actor) = levelinfo::TimeSeconds(levelData.levelInfo);
         }
         applyBlend(PF_Modulated, 0);
-        glDisable(GL_CULL_FACE);
-        glDepthMask(GL_FALSE);
-        shader->bindTexture(info->id);
-        shader->draw(vertices, GL_TRIANGLES);
-        glDepthMask(GL_TRUE);
-        glDisable(GL_BLEND);
+        device->setCulling(false);
+        device->setDepthWrite(false);
+        device->bindTexture(info->id);
+        device->draw(vertices, Primitive::Triangles);
+        device->setBlend(BlendMode::Opaque);
     }
 
     void SceneRenderer::drawActor(UObject* actor, const View& view)
@@ -3248,13 +3268,13 @@ namespace dx {
 
     void SceneRenderer::applyView(const View& view)
     {
-        shader->use();
-        shader->setViewProj(view.viewProj);
-        shader->setPan(0, 0);
-        shader->setTint(1, 1, 1, 1);
-        glEnable(GL_DEPTH_TEST);
-        glDepthFunc(GL_LEQUAL);
-        glFrontFace(view.mirrored ? GL_CCW : GL_CW);
+        device->useShader();
+        device->setViewProj(view.viewProj);
+        device->setPan(0, 0);
+        device->setTint(1, 1, 1, 1);
+        device->setDepthTest(true);
+        device->setDepthFunc(DepthFunc::LessEqual);
+        device->setFrontFace(!view.mirrored);
     }
 
     bool SceneRenderer::actorBounds(UObject* actor, Vector& center, float& radius) const
@@ -3302,14 +3322,11 @@ namespace dx {
                 if (!inside) {
                     OcclusionState& state = occlusion[actor];
                     if (state.pending) {
-                        GLuint available = 0;
-                        glGetQueryObjectuiv(state.query, GL_QUERY_RESULT_AVAILABLE, &available);
-                        if (available) {
-                            GLuint result = 0;
-                            glGetQueryObjectuiv(state.query, GL_QUERY_RESULT, &result);
+                        bool visible = false;
+                        if (device->queryResult(state.query, visible)) {
                             state.pending = false;
                             state.known = true;
-                            state.visible = result != 0;
+                            state.visible = visible;
                             state.resultFrame = state.issuedFrame;
                         }
                     }
@@ -3319,7 +3336,7 @@ namespace dx {
                     }
                     if (!state.pending) {
                         if (!state.query) {
-                            glGenQueries(1, &state.query);
+                            state.query = device->createQuery();
                         }
                         Vector low = center - Vector { extent, extent, extent };
                         Vector high = center + Vector { extent, extent, extent };
@@ -3349,30 +3366,30 @@ namespace dx {
         if (occlusionIssued.empty()) {
             return;
         }
-        shader->setBlend(BlendMode::Opaque);
-        shader->setFlags(0);
-        glDepthMask(GL_FALSE);
-        glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-        glDisable(GL_CULL_FACE);
-        shader->upload(occlusionBoxes);
+        device->setBlend(BlendMode::Opaque);
+        device->setFlags(0);
+        device->setDepthWrite(false);
+        device->setColorWrite(false);
+        device->setCulling(false);
+        device->upload(occlusionBoxes);
         for (size_t i = 0; i < occlusionIssued.size(); i++) {
-            glBeginQuery(GL_ANY_SAMPLES_PASSED, occlusionIssued[i]->query);
-            shader->drawRange(static_cast<int32_t>(i * 36), 36);
-            glEndQuery(GL_ANY_SAMPLES_PASSED);
+            device->beginQuery(occlusionIssued[i]->query);
+            device->drawRange(static_cast<int32_t>(i * 36), 36);
+            device->endQuery();
         }
-        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-        glDepthMask(GL_TRUE);
+        device->setColorWrite(true);
+        device->setDepthWrite(true);
     }
 
     void SceneRenderer::drawActors(const std::vector<UObject*>& actors, const View& view, UObject* viewActor, bool occlude)
     {
-        shader->use();
-        shader->setViewProj(view.viewProj);
-        shader->setPan(0, 0);
-        shader->setTint(1, 1, 1, 1);
-        glEnable(GL_DEPTH_TEST);
-        glDepthFunc(GL_LEQUAL);
-        glFrontFace(view.mirrored ? GL_CCW : GL_CW);
+        device->useShader();
+        device->setViewProj(view.viewProj);
+        device->setPan(0, 0);
+        device->setTint(1, 1, 1, 1);
+        device->setDepthTest(true);
+        device->setDepthFunc(DepthFunc::LessEqual);
+        device->setFrontFace(!view.mirrored);
         bool behindView = false;
         if (viewActor && viewActor->data && viewActor->isA(namePawn)) {
             behindView = pawn::bBehindView(viewActor) != 0;
@@ -3444,25 +3461,27 @@ namespace dx {
             setActorOrder(actor, view);
             drawActor(actor, view);
         }
+        device->setOcclusionSource(OcclusionSource::World);
         flushBatches(brushBatches);
         for (UObject* actor : decals) {
             drawDecal(actor, view);
         }
+        device->setOcclusionSource(OcclusionSource::Mesh);
         flushMeshBatches();
     }
 
     void SceneRenderer::drawScene(ULevel* level, const std::vector<UObject*>& actors, const Vector& location, const Rotator& rotation, float fov, UObject* viewActor)
     {
-        canvasImpl->flush();
-        scenePass->begin(frameWidth, frameHeight, options.multisample);
+        device->flushCanvas();
+        device->beginScene(frameWidth, frameHeight, options.multisample, renderMode == RenderMode::Textured ? options.ambientOcclusion : OcclusionQuality::Off);
         drawSceneRect(level, actors, location, rotation, fov, viewActor, 0, 0, frameWidth, frameHeight);
-        scenePass->end(frameWidth, frameHeight, options.fxaa);
-        shader->use();
+        device->endScene(frameWidth, frameHeight, options.fxaa);
+        device->useShader();
     }
 
     void SceneRenderer::drawSceneRect(ULevel* level, const std::vector<UObject*>& actors, const Vector& location, const Rotator& rotation, float fov, UObject* viewActor, int x, int y, int width, int height)
     {
-        canvasImpl->flush();
+        device->flushCanvas();
         if (!level || width <= 0 || height <= 0) {
             return;
         }
@@ -3473,21 +3492,20 @@ namespace dx {
         sceneFrame++;
         collectLights(actors);
         collectDynamicLights(location);
-        int glY = frameHeight - y - height;
-        glViewport(x, glY, width, height);
+        int bottom = frameHeight - y - height;
+        device->setViewport(x, bottom, width, height);
         viewAspect = static_cast<float>(width) / static_cast<float>(height);
         if (!fullFrame) {
-            glEnable(GL_SCISSOR_TEST);
-            glScissor(x, glY, width, height);
-            glDepthMask(GL_TRUE);
-            glClearColor(0, 0, 0, 1);
-            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            device->enableScissor(x, bottom, width, height);
+            device->setDepthWrite(true);
+            device->clear(true, true, 1.0f);
         }
 
         viewportWidth = width;
         viewportHeight = height;
         View view = makeView(location, rotation, fov, sceneNearPlane);
-        view.zoneMask = visibleZones(pointZone(location));
+        bool wireframe = renderMode == RenderMode::Wireframe;
+        view.zoneMask = wireframe ? ~0ull : visibleZones(pointZone(location));
         if (levelData.model && levelData.levelInfo) {
             for (size_t zone = 0; zone < levelData.model->zones.size(); zone++) {
                 if (view.zoneMask & (1ull << (zone & 63))) {
@@ -3496,51 +3514,120 @@ namespace dx {
             }
         }
         view.fog = true;
-        occludeView(view, nullptr);
-        if (levelData.hasBackdrop) {
-            drawSky(view, actors, viewActor);
-            glDepthMask(GL_TRUE);
-            glClear(GL_DEPTH_BUFFER_BIT);
+        if (!wireframe) {
+            occludeView(view, nullptr);
         }
-        if (!levelData.mirrors.empty()) {
+        if (levelData.hasBackdrop && !wireframe) {
+            drawSky(view, actors, viewActor);
+            device->setDepthWrite(true);
+            device->clear(false, true, 1.0f);
+        }
+        if (!levelData.mirrors.empty() && !wireframe) {
             drawMirrors(view, actors);
-            glDepthMask(GL_TRUE);
-            glClear(GL_DEPTH_BUFFER_BIT);
+            device->setDepthWrite(true);
+            device->clear(false, true, 1.0f);
         }
         collectVolumetrics(view);
-        drawFrameContent(view, actors, viewActor, fullFrame);
-        drawCoronas(view, x, y, width, height);
-        glDisable(GL_CULL_FACE);
-        glDisable(GL_DEPTH_TEST);
+        if (wireframe) {
+            drawWireframe(view, actors, viewActor);
+        } else {
+            device->beginOcclusion();
+            drawFrameContent(view, actors, viewActor, fullFrame);
+            drawCoronas(view, x, y, width, height);
+        }
+        if (renderMode == RenderMode::ZonePortal) {
+            drawPortals(view);
+        }
+        device->setCulling(false);
+        device->setDepthTest(false);
         if (!fullFrame) {
-            glDisable(GL_SCISSOR_TEST);
-            glViewport(0, 0, frameWidth, frameHeight);
+            device->disableScissor();
+            device->setViewport(0, 0, frameWidth, frameHeight);
         }
         viewAspect = static_cast<float>(frameWidth) / static_cast<float>(frameHeight);
     }
 
     void SceneRenderer::drawActorOverlay(UObject* actor, const Vector& viewLocation, const Rotator& viewRotation, float fov, bool clearZ)
     {
-        canvasImpl->flush();
+        device->flushCanvas();
         if (!actor || !actor->data) {
             return;
         }
-        glViewport(0, 0, frameWidth, frameHeight);
+        device->setViewport(0, 0, frameWidth, frameHeight);
         if (clearZ) {
-            glDepthMask(GL_TRUE);
-            glClear(GL_DEPTH_BUFFER_BIT);
+            device->setDepthWrite(true);
+            device->clear(false, true, 1.0f);
         }
         View view = makeView(viewLocation, viewRotation, fov, clearZ ? overlayNearPlane : sceneNearPlane);
-        shader->use();
-        shader->setViewProj(view.viewProj);
-        shader->setPan(0, 0);
-        shader->setTint(1, 1, 1, 1);
-        glEnable(GL_DEPTH_TEST);
-        glDepthFunc(GL_LEQUAL);
+        device->useShader();
+        device->setViewProj(view.viewProj);
+        device->setPan(0, 0);
+        device->setTint(1, 1, 1, 1);
+        device->setDepthTest(true);
+        device->setDepthFunc(DepthFunc::LessEqual);
         drawActor(actor, view);
         flushMeshBatches();
         flushTranslucent(view);
-        glDisable(GL_CULL_FACE);
-        glDisable(GL_DEPTH_TEST);
+        device->setCulling(false);
+        device->setDepthTest(false);
+    }
+
+    uint32_t SceneRenderer::flatVao()
+    {
+        size_t index = renderMode == RenderMode::ZonePortal ? 0 : 1;
+        if (levelData.flatVaos[index] || levelData.vertices.empty()) {
+            return levelData.flatVaos[index];
+        }
+        std::vector<GLVertex> vertices = levelData.vertices;
+        for (const Batch& batch : levelData.batches) {
+            Vector textureColor { 0.5f, 0.5f, 0.5f };
+            if (batch.texture && batch.texture->data) {
+                Color mip = bitmap::MipZero(batch.texture);
+                if (mip.r || mip.g || mip.b) {
+                    textureColor = Vector { static_cast<float>(mip.r), static_cast<float>(mip.g), static_cast<float>(mip.b) } / 255.0f;
+                }
+            }
+            for (const auto& [first, count, node] : batch.nodePolys) {
+                Vector color = index == 0 ? zoneColor(batch.zone, node, textureColor) : bspCutColor(node);
+                for (int32_t i = first; i < first + count; i++) {
+                    vertices[static_cast<size_t>(i)].r = color.x;
+                    vertices[static_cast<size_t>(i)].g = color.y;
+                    vertices[static_cast<size_t>(i)].b = color.z;
+                }
+            }
+        }
+        levelData.flatVaos[index] = device->createStatic(vertices);
+        return levelData.flatVaos[index];
+    }
+
+    void SceneRenderer::drawWireframe(const View& view, const std::vector<UObject*>& actors, UObject* viewActor)
+    {
+        device->useShader();
+        applyClip(view);
+        applyView(view);
+        device->setScale(1, 1);
+        device->setTint(0.6f, 0.6f, 0.6f, 1);
+        device->setBlend(BlendMode::Opaque);
+        device->setFlags(0);
+        device->setDepthTest(false);
+        device->draw(levelData.wireVertices, Primitive::Lines);
+        device->setTint(1, 1, 1, 1);
+        device->setWireframe(true);
+        drawActors(actors, view, viewActor, false);
+        flushTranslucent(view);
+        device->setWireframe(false);
+    }
+
+    void SceneRenderer::drawPortals(const View& view)
+    {
+        applyView(view);
+        device->setScale(1, 1);
+        device->setTint(1.0f, 0.25f, 0.9f, 0.45f);
+        device->setBlend(BlendMode::Alpha);
+        device->setFlags(0);
+        device->setCulling(false);
+        device->draw(levelData.portalVertices, Primitive::Triangles);
+        device->setTint(1, 1, 1, 1);
+        device->setBlend(BlendMode::Opaque);
     }
 }

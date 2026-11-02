@@ -312,11 +312,11 @@ namespace {
             dx::objects::flushLoads();
         }
 
-        dx::UClass* createExtraOptionsScreen()
+        dx::UClass* createExtraOptionsScreen(const char* name, const char* title)
         {
-            dx::UClass* screen = dx::objects::createSubclass(dx::objects::findClass("DeusEx.MenuScreenOptions"), dx::Name("MenuScreenExtraOptions"));
+            dx::UClass* screen = dx::objects::createSubclass(dx::objects::findClass("DeusEx.MenuScreenOptions"), dx::Name(name));
             dx::UObject* defaults = screen->defaultObject;
-            *reinterpret_cast<std::string*>(defaults->propertyAddress(dx::Name("Title"))) = "Extra Options";
+            *reinterpret_cast<std::string*>(defaults->propertyAddress(dx::Name("Title"))) = title;
             for (int i = 0; i < screen->findProperty(dx::Name("choices"))->arrayDim; i++) {
                 *reinterpret_cast<dx::UObject**>(defaults->propertyAddress(dx::Name("choices"), i)) = nullptr;
             }
@@ -354,7 +354,8 @@ namespace {
 
         void addExtraOptions()
         {
-            dx::UClass* screen = createExtraOptionsScreen();
+            dx::UClass* gameplay = createExtraOptionsScreen("MenuScreenExtraGameplayOptions", "Extra Gameplay Options");
+            dx::UClass* screen = createExtraOptionsScreen("MenuScreenExtraGraphicsOptions", "Extra Graphics Options");
             bool trilinear = dx::config::system().get("OpenGLDrv.OpenGLRenderDevice", "UseTrilinear").value_or("False") == "True";
             addEnumChoice(screen, 0, "MenuChoice_Anisotropy", "|&Anisotropic Filtering", "Sharpens textures seen at a steep angle, such as floors in the distance.", "Anisotropy", { "Off", "2x", "4x", "8x", "16x" }, 0);
             addSwitchChoice(screen, 1, "MenuChoice_Trilinear", "|&Trilinear Filtering", "Blends between texture detail levels to remove visible bands on floors and walls.", "UseTrilinear", trilinear);
@@ -362,14 +363,34 @@ namespace {
             addSwitchChoice(screen, 3, "MenuChoice_FXAA", "|&FXAA", "Fast edge smoothing of the 3D view that also covers masked textures such as fences.", "FXAA", false);
             addSwitchChoice(screen, 4, "MenuChoice_SmoothLighting", "Smooth |&Lighting", "Filters lightmaps with a bicubic filter to soften blocky shadow edges.", "SmoothLightmaps", false);
             addEnumChoice(screen, 5, "MenuChoice_DetailDistance", "|&Detail Distance", "How far away detail textures stay visible. Normal matches the original game.", "DetailDistance", { "Normal", "Far", "Very Far" }, 0);
-            if (browser) {
-                addPlayerSpeedChoice(screen, 6);
-            } else {
+            int next = 6;
+            if (!browser) {
                 addEnumChoice(screen, 6, "MenuChoice_VSync", "|&Vertical Sync", "Waits for the display refresh. Adaptive skips the wait when a frame is late.", "VSync", { "Off", "On", "Adaptive" }, 1);
                 addEnumChoice(screen, 7, "MenuChoice_FrameRateLimit", "Frame Rate L|&imit", "Caps the frame rate to save power and reduce heat.", "FrameRateLimit", { "Off", "30", "60", "75", "120", "144", "165", "240" }, 0);
-                addPlayerSpeedChoice(screen, 8);
+                next = 8;
             }
-            dx::deusex::insertMenuButton(dx::objects::findClass("DeusEx.MenuSettings")->defaultObject, 3, "Extra Options", screen);
+            addSwitchChoice(screen, next, "MenuChoice_LimitTextureAnimation", "Limit Texture A|&nimation", "Keeps water and fire textures at 60 updates per second. Off matches the original game.", "LimitTextureAnimation", true);
+            addEnumChoice(screen, next + 1, "MenuChoice_AmbientOcclusion", "Ambient |&Occlusion", "Adds soft contact shadows under characters and objects. Higher levels are smoother and cost more performance. Off matches the original game.", "AmbientOcclusion", { "Off", "Low", "Medium", "High" }, 0);
+            if (!browser) {
+                dx::UObject* graphicsDefaults = screen->defaultObject;
+                int gap = *reinterpret_cast<int32_t*>(graphicsDefaults->propertyAddress(dx::Name("choiceVerticalGap")));
+                int sliderRow = *reinterpret_cast<int32_t*>(graphicsDefaults->propertyAddress(dx::Name("choiceStartY"))) + 8 * gap;
+                int32_t& clientHeight = *reinterpret_cast<int32_t*>(graphicsDefaults->propertyAddress(dx::Name("ClientHeight")));
+                dx::deusex::spliceMenuBackground(graphicsDefaults, clientHeight, *reinterpret_cast<int32_t*>(graphicsDefaults->propertyAddress(dx::Name("textureRows"))) * 256);
+                dx::deusex::spliceMenuBackground(graphicsDefaults, sliderRow, sliderRow + gap);
+                dx::deusex::spliceMenuBackground(graphicsDefaults, sliderRow, sliderRow - gap);
+                dx::deusex::spliceMenuBackground(graphicsDefaults, sliderRow + gap, sliderRow);
+                clientHeight += gap;
+                *reinterpret_cast<int32_t*>(graphicsDefaults->propertyAddress(dx::Name("helpPosY"))) += gap;
+            }
+            addPlayerSpeedChoice(gameplay, 0);
+            dx::UObject* gameplayDefaults = gameplay->defaultObject;
+            dx::deusex::spliceMenuBackground(gameplayDefaults, 55, 343);
+            *reinterpret_cast<int32_t*>(gameplayDefaults->propertyAddress(dx::Name("ClientHeight"))) -= 288;
+            *reinterpret_cast<int32_t*>(gameplayDefaults->propertyAddress(dx::Name("helpPosY"))) -= 288;
+            dx::UObject* settings = dx::objects::findClass("DeusEx.MenuSettings")->defaultObject;
+            dx::deusex::insertMenuButton(settings, 3, "Extra Gameplay", gameplay);
+            dx::deusex::insertMenuButton(settings, 5, "Extra Graphics", screen);
         }
 
         void addPlayerSpeedChoice(dx::UClass* screen, int index)
@@ -423,6 +444,8 @@ namespace {
             render.smoothLightmaps = videoSetting("SmoothLightmaps", 0) != 0;
             const float detailDistances[] = { 380.0f, 1024.0f, 2048.0f };
             render.detailDistance = detailDistances[std::clamp(videoSetting("DetailDistance", 0), 0, 2)];
+            render.textureRate = videoSetting("LimitTextureAnimation", 1) != 0 ? 60.0f : 0.0f;
+            render.ambientOcclusion = static_cast<dx::OcclusionQuality>(std::clamp(videoSetting("AmbientOcclusion", 0), 0, 3));
             renderer->setOptions(render);
             if (browser || options.frames >= 0) {
                 return;

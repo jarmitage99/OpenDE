@@ -3,12 +3,11 @@
 #include "engine/canvas.h"
 #include "engine/mesh.h"
 #include "engine/resources.h"
-#include "render/gl_canvas.h"
-#include "render/gl_shader.h"
 #include "render/lighting.h"
 #include "render/lightmap.h"
+#include "render/render_device.h"
 #include "render/span_buffer.h"
-#include "render/texture_cache.h"
+#include "render/view_modes.h"
 
 #include <array>
 #include <cstdint>
@@ -40,6 +39,8 @@ namespace dx {
         bool fxaa = false;
         bool smoothLightmaps = false;
         float detailDistance = 380;
+        float textureRate = 0;
+        OcclusionQuality ambientOcclusion = OcclusionQuality::Off;
     };
 
     class SceneRenderer {
@@ -61,6 +62,7 @@ namespace dx {
         void flushLevel();
         void setTime(double seconds);
         void setViewportTime(double seconds);
+        void setRenderMode(RenderMode mode);
 
         std::function<bool(UObject* actor, const std::function<void(UObject* item)>& emit)> iteratorHook;
 
@@ -123,14 +125,11 @@ namespace dx {
             ULevel* level = nullptr;
             UModel* model = nullptr;
             uint32_t vao = 0;
-            uint32_t vbo = 0;
             uint32_t detailVao = 0;
-            uint32_t detailVbo = 0;
             std::vector<Vector> detailPoints;
             std::vector<Batch> batches;
             bool hasBackdrop = false;
             uint32_t mirrorVao = 0;
-            uint32_t mirrorVbo = 0;
             std::vector<MirrorSurface> mirrors;
             std::vector<std::vector<int32_t>> surfNodes;
             std::vector<int32_t> nodeVolumetrics;
@@ -151,6 +150,10 @@ namespace dx {
             std::vector<int32_t> cullOrder;
             std::vector<std::vector<std::array<int32_t, 3>>> batchRanges;
             UObject* levelInfo = nullptr;
+            std::vector<GLVertex> vertices;
+            std::vector<GLVertex> wireVertices;
+            std::vector<GLVertex> portalVertices;
+            uint32_t flatVaos[2] = {};
         };
 
         struct TranslucentSurface {
@@ -337,12 +340,11 @@ namespace dx {
         void selectActorLights(UObject* actor);
         void applyBlend(uint32_t polyFlags, int32_t extraFlags);
         const std::vector<MeshTriangle>& meshTriangles(UMesh* mesh);
+        uint32_t flatVao();
+        void drawWireframe(const View& view, const std::vector<UObject*>& actors, UObject* viewActor);
+        void drawPortals(const View& view);
 
-        std::unique_ptr<UberShader> shader;
-        std::unique_ptr<GammaPass> gammaPass;
-        std::unique_ptr<ScenePass> scenePass;
-        std::unique_ptr<TextureCache> textures;
-        std::unique_ptr<GLCanvas> canvasImpl;
+        std::unique_ptr<RenderDevice> device;
         LightmapAtlas lightmaps;
         LevelData levelData;
         std::vector<UObject*> lights;
@@ -436,5 +438,6 @@ namespace dx {
         float gammaExponent = 1;
         bool offscreen = false;
         RenderOptions options;
+        RenderMode renderMode = RenderMode::Textured;
     };
 }

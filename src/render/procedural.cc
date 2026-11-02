@@ -486,7 +486,7 @@ namespace dx {
             }
         }
 
-        bool tick(double time)
+        bool tick(double time, float constantRate)
         {
             if (started && time == lastTime) {
                 return false;
@@ -508,12 +508,17 @@ namespace dx {
                 ticked = true;
             }
             float maxFrameRate = texture::MaxFrameRate(texture);
+            float minFrameRate = texture::MinFrameRate(texture);
+            if (maxFrameRate == 0.0f && constantRate > 0.0f) {
+                maxFrameRate = constantRate;
+                minFrameRate = constantRate;
+            }
             if (maxFrameRate == 0.0f) {
                 constantTimeTick();
                 return true;
             }
             float minTime = 1.0f / std::clamp(maxFrameRate, 0.01f, 100.0f);
-            float maxTime = 1.0f / std::clamp(texture::MinFrameRate(texture), 0.01f, 100.0f);
+            float maxTime = 1.0f / std::clamp(minFrameRate, 0.01f, 100.0f);
             accumulator += delta;
             if (accumulator < minTime) {
                 return ticked;
@@ -1462,6 +1467,16 @@ namespace dx {
         states.clear();
     }
 
+    void ProceduralTextures::reset(UTexture* texture)
+    {
+        states.erase(texture);
+    }
+
+    void ProceduralTextures::setConstantRate(float rate)
+    {
+        constantRate = rate;
+    }
+
     bool ProceduralTextures::update(UTexture* texture, double time, std::vector<uint8_t>& rgba, uint32_t& width, uint32_t& height)
     {
         auto& slot = states[texture];
@@ -1487,7 +1502,7 @@ namespace dx {
                 state.refreshBitmap(i == 0 ? state.sourceBitmap : state.glassBitmap, sourceState.pixels, sourceState.usize, sourceState.vsize, state.kind == Kind::Wet);
             }
         }
-        bool changed = state.tick(time);
+        bool changed = state.tick(time, constantRate);
         if (!changed && !created) {
             return false;
         }

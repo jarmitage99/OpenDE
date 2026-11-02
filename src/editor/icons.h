@@ -1,0 +1,49 @@
+#pragma once
+
+namespace dx::editor::icons {
+    inline constexpr const char* Object = "\xef\xaa\x97";
+    inline constexpr const char* Vertex = "\xee\xac\x8c";
+    inline constexpr const char* Edge = "\xee\xb1\x80";
+    inline constexpr const char* Face = "\xee\xbf\x90";
+    inline constexpr const char* Move = "\xef\x88\xaf";
+    inline constexpr const char* Rotate = "\xee\xae\xb5";
+    inline constexpr const char* Scale = "\xee\xa8\xa7";
+    inline constexpr const char* Extrude = "\xee\xb2\x8b";
+    inline constexpr const char* Open = "\xef\xab\xb7";
+    inline constexpr const char* New = "\xee\xaa\xa4";
+    inline constexpr const char* Save = "\xee\xad\xa2";
+    inline constexpr const char* Play = "\xee\xb5\x86";
+    inline constexpr const char* Undo = "\xee\xad\xb7";
+    inline constexpr const char* Redo = "\xee\xad\xb8";
+    inline constexpr const char* Duplicate = "\xee\xa9\xba";
+    inline constexpr const char* Delete = "\xee\xad\x81";
+    inline constexpr const char* Search = "\xee\xac\x9c";
+    inline constexpr const char* Build = "\xee\xbe\x91";
+    inline constexpr const char* Focus = "\xee\xaf\x93";
+    inline constexpr const char* Grid = "\xee\xaa\xba";
+    inline constexpr const char* Layout = "\xee\xb6\xba";
+    inline constexpr const char* Clip = "\xee\xac\x9b";
+    inline constexpr const char* Mirror = "\xee\xaa\xa7";
+    inline constexpr const char* Show = "\xee\xaa\x9a";
+    inline constexpr const char* Maximize = "\xee\xab\xaa";
+    inline constexpr const char* Restore = "\xee\xab\xb1";
+    inline constexpr const char* Actors = "\xef\xab\xba";
+    inline constexpr const char* Classes = "\xee\xba\x9d";
+    inline constexpr const char* Textures = "\xee\xac\x8a";
+    inline constexpr const char* Brush = "\xee\xae\xb8";
+    inline constexpr const char* Surface = "\xef\x94\x9b";
+    inline constexpr const char* Sounds = "\xee\xad\x91";
+    inline constexpr const char* Music = "\xee\xab\xbc";
+    inline constexpr const char* Meshes = "\xee\xbc\xa3";
+    inline constexpr const char* Script = "\xee\xa9\xb7";
+    inline constexpr const char* Tools = "\xee\xad\x80";
+    inline constexpr const char* Log = "\xee\xaf\xaf";
+    inline constexpr const char* Ruler = "\xef\x8a\x91";
+    inline constexpr const char* Angle = "\xee\xbc\xa0";
+    inline constexpr const char* Camera = "\xee\xba\xbd";
+    inline constexpr const char* Mover = "\xee\xa9\x8a";
+    inline constexpr const char* File = "\xee\xaa\xa4";
+    inline constexpr const char* Edit = "\xee\xac\x84";
+    inline constexpr const char* Actor = "\xee\xad\x8d";
+    inline constexpr const char* View = "\xee\xaa\x9a";
+}

@@ -374,3 +374,32 @@ TEST_CASE("a wet texture refracts the live frame of a procedural source", "[data
     }
     CHECK(differentFrames > 0);
 }
+
+TEST_CASE("procedural textures with no frame rate limit can be capped at 60 steps per second", "[data]")
+{
+    SinglePulseFire setup(0, 0, 0, 10);
+    std::vector<uint8_t> rgba;
+    uint32_t width = 0;
+    uint32_t height = 0;
+
+    dx::ProceduralTextures perFrame;
+    REQUIRE(perFrame.update(setup.fire, 1.0, rgba, width, height));
+    int perFrameSteps = 0;
+    for (int i = 1; i <= 480; i++) {
+        if (perFrame.update(setup.fire, 1.0 + i / 480.0, rgba, width, height)) {
+            perFrameSteps++;
+        }
+    }
+    CHECK(perFrameSteps == 480);
+
+    dx::ProceduralTextures capped;
+    capped.setConstantRate(60.0f);
+    REQUIRE(capped.update(setup.fire, 1.0, rgba, width, height));
+    int cappedSteps = 0;
+    for (int i = 1; i <= 480; i++) {
+        if (capped.update(setup.fire, 1.0 + i / 480.0, rgba, width, height)) {
+            cappedSteps++;
+        }
+    }
+    CHECK(cappedSteps == 60);
+}

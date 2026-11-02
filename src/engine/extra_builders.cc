@@ -1,67 +1,13 @@
 #include "engine/extra_builders.h"
 
-#include "engine/brush_builder.h"
 #include "engine/bsp.h"
+#include "engine/builder_mesh.h"
 
 #include <cmath>
-#include <cstdio>
-#include <cstdlib>
 
 namespace dx {
     namespace brushbuilder {
         namespace {
-            struct Mesh {
-                std::vector<Vector> vertices;
-                std::vector<BuilderPolygon> polys;
-                std::vector<Vector> pending;
-                Name item;
-                int32_t flags = 0;
-
-                void flush()
-                {
-                    if (pending.empty()) {
-                        return;
-                    }
-                    BuilderPolygon poly;
-                    poly.item = item;
-                    poly.flags = flags;
-                    for (const Vector& v : pending) {
-                        poly.indices.push_back(static_cast<int32_t>(vertices.size()));
-                        vertices.push_back(v);
-                    }
-                    polys.push_back(poly);
-                    pending.clear();
-                }
-
-                void begin(const char* name, int count, int32_t polyFlags = 0)
-                {
-                    flush();
-                    pending.assign(static_cast<size_t>(count), Vector {});
-                    item = Name(name);
-                    flags = polyFlags;
-                }
-
-                void put(int index, double x, double y, double z);
-
-                void ring(int index, double radius, double angle, double z)
-                {
-                    put(index, radius * std::cos(angle), radius * std::sin(angle), z);
-                }
-            };
-
-            float quantize(float value)
-            {
-                float scaled = static_cast<float>(std::floor(static_cast<double>(value) * 10000.0) / 10000.0);
-                char text[32];
-                std::snprintf(text, sizeof(text), "%.7g", static_cast<double>(scaled));
-                return std::strtof(text, nullptr);
-            }
-
-            void Mesh::put(int index, double x, double y, double z)
-            {
-                pending[static_cast<size_t>(index - 1)] = { quantize(static_cast<float>(x)), quantize(static_cast<float>(y)), quantize(static_cast<float>(z)) };
-            }
-
             double single(double v)
             {
                 return static_cast<float>(v);
@@ -99,11 +45,7 @@ namespace dx {
 
             bool send(Mesh& mesh, UObject* brushActor, const char* group, std::string* error)
             {
-                mesh.flush();
-                if (!finishBrush(brushActor, mesh.vertices, mesh.polys, Name(group), false)) {
-                    return fail(error, "The builder brush has no model");
-                }
-                return true;
+                return sendMesh(mesh, brushActor, group, false, error);
             }
 
             bool buildLinearStair(const ExtraBuilder& builder, UObject* brushActor, std::string* error)
@@ -870,6 +812,109 @@ namespace dx {
                 return send(mesh, brushActor, "DOME", error);
             }
 
+            bool buildTube(const ExtraBuilder& builder, UObject* brushActor, std::string* error)
+            {
+                double outer = std::floor(value(builder, "OuterRadius"));
+                double inner = std::floor(value(builder, "InnerRadius"));
+                double height = std::floor(value(builder, "Height"));
+                int sides = static_cast<int>(std::floor(value(builder, "Sides")));
+                bool hollow = value(builder, "Hollow") != 0;
+                if (!hollow && sides > 100) {
+                    return fail(error, "You must have less than 100 Sides for Solid Tube");
+                }
+                if (hollow && sides > 45) {
+                    return fail(error, "You must have less than 45 Sides for Hollow Tube");
+                }
+                if (hollow && inner >= outer) {
+                    return fail(error, "The Inner Radius must be smaller than the Outer Radius");
+                }
+                if (sides < 3) {
+                    return fail(error, "You must have at least 3 Sides");
+                }
+                double pi = 4 * std::atan(1.0);
+                double angleInc = 2 * pi / sides;
+                double halfAngle = angleInc / 2;
+                double startAngle = angleInc / 2;
+                if (value(builder, "AlignSide") != 0) {
+                    if (inner != 0) {
+                        inner = 1 / (std::cos(halfAngle) / inner);
+                    }
+                    outer = 1 / (std::cos(halfAngle) / outer);
+                }
+                double bottom = single(-height / 2);
+                double top = single(height / 2);
+                Mesh mesh;
+                double angle = startAngle;
+                for (int i = 1; i <= sides; i++) {
+                    double next = i < sides ? angle + angleInc : startAngle;
+                    mesh.begin("Outer", 4);
+                    mesh.ring(4, outer, angle, bottom);
+                    mesh.ring(3, outer, angle, top);
+                    mesh.ring(2, outer, next, top);
+                    mesh.ring(1, outer, next, bottom);
+                    angle = angle + angleInc;
+                }
+                if (!hollow && sides > 12) {
+                    for (int cap = 0; cap < 2; cap++) {
+                        double z = cap == 0 ? bottom : top;
+                        angle = startAngle;
+                        int sideCounter = sides;
+                        while (sideCounter > 0) {
+                            int jend = sideCounter >= 6 ? 6 : sideCounter + 1;
+                            int v = cap == 0 ? jend + 1 : 1;
+                            mesh.begin("Base", jend + 1);
+                            for (int i = 1; i <= jend; i++) {
+                                mesh.ring(v, outer, angle, z);
+                                v = cap == 0 ? v - 1 : v + 1;
+                                if (i < jend) {
+                                    angle = angle + angleInc;
+                                    sideCounter = sideCounter - 1;
+                                }
+                            }
+                            mesh.put(v, 0, 0, z);
+                        }
+                    }
+                }
+                if (!hollow && sides <= 12) {
+                    const char* items[2] = { "Base", "Top" };
+                    for (int cap = 0; cap < 2; cap++) {
+                        mesh.begin(items[cap], sides);
+                        angle = startAngle;
+                        for (int i = 1; i <= sides; i++) {
+                            mesh.ring(cap == 0 ? sides + 1 - i : i, outer, angle, cap == 0 ? bottom : top);
+                            angle = angle + angleInc;
+                        }
+                    }
+                }
+                if (hollow) {
+                    angle = startAngle;
+                    for (int i = 1; i <= sides; i++) {
+                        double next = i < sides ? angle + angleInc : startAngle;
+                        mesh.begin("Inner", 4);
+                        mesh.ring(1, inner, angle, bottom);
+                        mesh.ring(2, inner, angle, top);
+                        mesh.ring(3, inner, next, top);
+                        mesh.ring(4, inner, next, bottom);
+                        angle = angle + angleInc;
+                    }
+                    const char* items[2] = { "Bottom", "Top" };
+                    for (int cap = 0; cap < 2; cap++) {
+                        double z = cap == 0 ? bottom : top;
+                        angle = startAngle;
+                        for (int i = 1; i <= sides; i++) {
+                            double next = i < sides ? angle + angleInc : startAngle;
+                            mesh.begin(items[cap], 4);
+                            mesh.ring(cap == 0 ? 1 : 4, outer, angle, z);
+                            mesh.ring(cap == 0 ? 2 : 3, inner, angle, z);
+                            mesh.ring(cap == 0 ? 3 : 2, inner, next, z);
+                            mesh.ring(cap == 0 ? 4 : 1, outer, next, z);
+                            angle = angle + angleInc;
+                        }
+                    }
+                }
+                return send(mesh, brushActor, "TUBE", error);
+            }
+
             bool buildVolumetric(const ExtraBuilder& builder, UObject* brushActor, std::string* error)
             {
                 int sheets = static_cast<int>(std::floor(value(builder, "NumSheets")));
@@ -902,6 +947,7 @@ namespace dx {
                 { "SpiralStair", { { "OuterSRad", 240, true, false }, { "InnerSRad", 64, true, false }, { "StepHeight", 16, true, false }, { "StepThickness", 32, true, false }, { "OuterWallRadius", 256, true, false }, { "NumSteps", 8, true, false }, { "CycleNum", 8, true, false }, { "AlignSide", 1, false, true }, { "Clockwise", 1, false, true }, { "IntFill", 0, false, true }, { "ExtFill", 0, false, true }, { "CeilingSloped", 0, false, true }, { "SurfaceSloped", 0, false, true } } },
                 { "Sphere", { { "OuterRadius", 512, true, false }, { "InnerRadius", 496, true, false }, { "RadialStripes", 8, true, false }, { "VerticalStripes", 4, true, false }, { "IsHollow", 0, false, true } } },
                 { "Volumetric", { { "NumSheets", 2, true, false }, { "Height", 128, false, false }, { "Radius", 64, false, false } } },
+                { "Tube", { { "OuterRadius", 512, true, false }, { "InnerRadius", 496, true, false }, { "Height", 256, true, false }, { "Sides", 8, true, false }, { "Hollow", 0, false, true }, { "AlignSide", 1, false, true } } },
             };
         }
 
@@ -924,6 +970,9 @@ namespace dx {
             }
             if (builder.name == "Volumetric") {
                 return buildVolumetric(builder, brushActor, error);
+            }
+            if (builder.name == "Tube") {
+                return buildTube(builder, brushActor, error);
             }
             return fail(error, "Unknown brush builder");
         }

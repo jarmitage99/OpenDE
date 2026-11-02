@@ -26,13 +26,16 @@ namespace dx::deusex {
         std::vector<uint8_t> pixels(static_cast<size_t>(width * height) * 4);
         for (int i = 0; i < cols * rows; i++) {
             UTexture* tile = tiles[static_cast<size_t>(i)];
-            std::vector<uint8_t> rgba = tile->rgba(0);
+            bool raw = tile->format() == 5;
+            std::vector<uint8_t> rgba = raw ? std::vector<uint8_t>() : tile->rgba(0);
             int tileWidth = static_cast<int>(tile->width());
             for (int y = 0; y < static_cast<int>(tile->height()); y++) {
                 for (int x = 0; x < tileWidth; x++) {
                     size_t from = static_cast<size_t>(y * tileWidth + x);
                     uint8_t* to = &pixels[(static_cast<size_t>((i / cols) * 256 + y) * static_cast<size_t>(width) + static_cast<size_t>((i % cols) * 256 + x)) * 4];
-                    if (tile->mips[0].data[from] != 0) {
+                    if (raw) {
+                        std::copy_n(tile->mips[0].data.begin() + static_cast<std::ptrdiff_t>(from * 4), 4, to);
+                    } else if (tile->mips[0].data[from] != 0) {
                         to[0] = rgba[from * 4 + 2];
                         to[1] = rgba[from * 4 + 1];
                         to[2] = rgba[from * 4 + 0];

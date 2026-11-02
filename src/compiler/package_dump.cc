@@ -743,6 +743,94 @@ namespace dx::compiler {
                         text += "pos=" + number(reader.u32());
                         text += " top=" + number(reader.u32());
                         text += " text=" + reader.string();
+                    } else if (className == "Sound" || className == "Music") {
+                        text += "format=" + name(reader);
+                        reader.u32();
+                        std::vector<uint8_t> data(static_cast<size_t>(reader.index()));
+                        reader.bytes(data.data(), data.size());
+                        uint64_t hash = 14695981039346656037ull;
+                        for (uint8_t byte : data) {
+                            hash = (hash ^ byte) * 1099511628211ull;
+                        }
+                        text += " size=" + number(data.size()) + " hash=" + number(hash);
+                    } else if (className == "Palette") {
+                        int32_t count = reader.index();
+                        text += "colors=";
+                        for (int32_t i = 0; i < count; i++) {
+                            char color[16];
+                            std::snprintf(color, sizeof(color), "%08x,", reader.u32());
+                            text += color;
+                        }
+                    } else if (className == "Texture" || className == "FireTexture" || className == "WaterTexture" || className == "WaveTexture" || className == "WetTexture" || className == "IceTexture") {
+                        int sets = text.find("bHasComp") != std::string::npos ? 2 : 1;
+                        for (int set = 0; set < sets; set++) {
+                            int32_t count = reader.index();
+                            text += set ? " comp=" : "mips=";
+                            for (int32_t i = 0; i < count; i++) {
+                                reader.u32();
+                                std::vector<uint8_t> data(static_cast<size_t>(reader.index()));
+                                reader.bytes(data.data(), data.size());
+                                uint64_t hash = 14695981039346656037ull;
+                                for (uint8_t byte : data) {
+                                    hash = (hash ^ byte) * 1099511628211ull;
+                                }
+                                text += "(" + number(data.size()) + ":" + number(hash);
+                                text += " " + number(reader.u32());
+                                text += "x" + number(reader.u32());
+                                text += " " + number(reader.u8());
+                                text += "," + number(reader.u8()) + ")";
+                            }
+                        }
+                    } else if (className == "Font") {
+                        int32_t pages = reader.index();
+                        for (int32_t i = 0; i < pages; i++) {
+                            text += "page=" + this->ref(reader) + " chars=";
+                            int32_t count = reader.index();
+                            for (int32_t c = 0; c < count; c++) {
+                                text += number(static_cast<uint32_t>(reader.i32())) + ",";
+                                text += number(static_cast<uint32_t>(reader.i32())) + ",";
+                                text += number(static_cast<uint32_t>(reader.i32())) + ",";
+                                text += number(static_cast<uint32_t>(reader.i32())) + ";";
+                            }
+                            text += " ";
+                        }
+                        text += "perpage=" + number(reader.u32());
+                    } else if (className == "Mesh" || className == "LodMesh") {
+                        auto raw = [&](size_t count) {
+                            std::vector<uint8_t> data(count);
+                            reader.bytes(data.data(), data.size());
+                            return hex(data.data(), data.size());
+                        };
+                        auto lazy = [&](size_t itemSize) {
+                            reader.u32();
+                            int32_t count = reader.index();
+                            std::string items = raw(static_cast<size_t>(count) * itemSize);
+                            return number(static_cast<uint32_t>(count)) + ":" + items;
+                        };
+                        text += "bounds=" + raw(41);
+                        text += " verts=" + lazy(8);
+                        text += " tris=" + lazy(20);
+                        int32_t sequences = reader.index();
+                        text += " seqs=";
+                        for (int32_t i = 0; i < sequences; i++) {
+                            text += name(reader) + "/";
+                            text += name(reader) + ":";
+                            text += raw(8) + " notifys=";
+                            int32_t notifys = reader.index();
+                            for (int32_t n = 0; n < notifys; n++) {
+                                text += raw(4) + ":";
+                                text += name(reader) + ",";
+                            }
+                            text += " rate=" + raw(4) + ";";
+                        }
+                        text += " connects=" + lazy(8);
+                        text += " meshbounds=" + raw(41);
+                        text += " links=" + lazy(4);
+                        int32_t textures = reader.index();
+                        text += " textures=";
+                        for (int32_t i = 0; i < textures; i++) {
+                            text += this->ref(reader) + ",";
+                        }
                     } else if (className.size() > 8 && className.compare(className.size() - 8, 8, "Property") == 0) {
                         text += field(reader);
                         text += " dim=" + number(static_cast<uint32_t>(reader.i32()));

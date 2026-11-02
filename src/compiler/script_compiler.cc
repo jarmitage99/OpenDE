@@ -1,5 +1,7 @@
 #include "compiler/script_compiler.h"
 
+#include "compiler/assets.h"
+#include "compiler/exec_parse.h"
 #include "compiler/script_parser.h"
 #include "core/objects.h"
 #include "engine/package.h"
@@ -84,6 +86,48 @@ namespace dx::compiler {
         }
     }
 
+    namespace {
+        void objLoad(PackageCompiler::Impl& context, std::string_view command)
+        {
+            std::string file;
+            if (!parseString(command, "FILE=", file)) {
+                context.log("Warning: OBJ LOAD: missing FILE=");
+                return;
+            }
+            std::replace(file.begin(), file.end(), '\\', '/');
+            std::string packageName = std::filesystem::path(file).stem().string();
+            Linker* linker = objects::loadPackage(Name(packageName));
+            if (!linker) {
+                context.log("Warning: OBJ LOAD could not load " + file);
+                return;
+            }
+            for (size_t i = 0; i < linker->file().exports().size(); i++) {
+                objects::ensureLoaded(linker->object(static_cast<int32_t>(i + 1)));
+            }
+            objects::flushLoads();
+        }
+
+        void runExecs(PackageCompiler::Impl& context)
+        {
+            for (const auto& [cls, command] : context.pendingExecs) {
+                std::string_view text = command;
+                std::string_view objText = text;
+                if (dx::compiler::parseCommand(objText, "OBJ") && dx::compiler::parseCommand(objText, "LOAD")) {
+                    objLoad(context, objText);
+                    continue;
+                }
+                ExecContext exec;
+                exec.package = context.package;
+                exec.directory = context.files.count(cls) ? context.files[cls].parent_path().parent_path() : std::filesystem::path();
+                exec.log = context.log;
+                if (!importAsset(exec, command)) {
+                    context.log("Warning: unsupported #exec " + command);
+                }
+            }
+            context.pendingExecs.clear();
+        }
+    }
+
     PackageCompiler::PackageCompiler(UObject* package, LogSink log)
         : impl(std::make_unique<Impl>())
     {
@@ -164,6 +208,15 @@ namespace dx::compiler {
             return nullptr;
         };
         UClass* result = inPackage(className);
+        bool updateNative = result && (result->flags & RF_Native);
+        if (result && result->defaultObject) {
+            result->defaultObject->destroyed = true;
+            result->defaultObject = nullptr;
+            result->linked = false;
+            result->properties.clear();
+            result->size = 0;
+            result->alignment = 1;
+        }
         if (!result) {
             Name classObjectName = iequals(className, expected) ? fileName : Name(className);
             result = detail::createField(new UClass(), impl->package, classObjectName, nullptr, RF_Public | RF_Standalone);
@@ -172,16 +225,18 @@ namespace dx::compiler {
         if (std::find(impl->nativeClasses.begin(), impl->nativeClasses.end(), result->name) != impl->nativeClasses.end()) {
             result->flags |= RF_Native;
         }
-        UClass* base = inPackage(baseClassName);
-        if (!base) {
-            base = lookup.findClass(baseClassName);
+        if (!updateNative) {
+            UClass* base = inPackage(baseClassName);
+            if (!base) {
+                base = lookup.findClass(baseClassName);
+            }
+            if (!base && !baseClassName.empty()) {
+                base = detail::createField(new UClass(), impl->package, Name(baseClassName), nullptr, RF_Public | RF_Standalone);
+                base->superField = result;
+                lookup.add(base);
+            }
+            result->superField = base;
         }
-        if (!base && !baseClassName.empty()) {
-            base = detail::createField(new UClass(), impl->package, Name(baseClassName), nullptr, RF_Public | RF_Standalone);
-            base->superField = result;
-            lookup.add(base);
-        }
-        result->superField = base;
         UTextBuffer* buffer = detail::createField(new UTextBuffer(), result, Name("ScriptText"), "TextBuffer", RF_NotForClient | RF_NotForServer);
         buffer->text = scriptText;
         result->scriptText = buffer;
@@ -241,7 +296,15 @@ namespace dx::compiler {
             return true;
         };
         UClass* root = objects::objectClass();
-        bool success = parse(root) && compileTree(root);
+        if (!parse(root)) {
+            return false;
+        }
+        runExecs(context);
+        bool success = compileTree(root);
+        ExecContext finish;
+        finish.package = context.package;
+        finish.log = context.log;
+        finishAssets(finish);
         return success && context.errorCount == 0;
     }
 }
