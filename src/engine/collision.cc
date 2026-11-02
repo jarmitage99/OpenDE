@@ -1129,7 +1129,7 @@ namespace dx {
                     Rotator reduced { 0, (rotation.yaw & 65535) - (oldRotation.yaw & 65535), 0 };
                     Vector pointer = actor::Location(a) - actor::Location(other);
                     Coords spin = rotationAxes(reduced);
-                    rotationMotion = pointer - transformVector(spin, pointer);
+                    rotationMotion = pointer - untransformVector(spin, pointer);
                 }
                 CheckResult otherHit;
                 Rotator otherRotation = actor::Rotation(other);

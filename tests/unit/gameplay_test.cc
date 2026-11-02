@@ -6,6 +6,7 @@
 #include "engine/input.h"
 #include "engine/props_engine.h"
 #include "engine/world.h"
+#include "extension/extension.h"
 
 #include <catch_amalgamated.hpp>
 
@@ -50,6 +51,22 @@ namespace {
         for (int i = 0; i < frames; i++) {
             world.tick(1.0f / 30.0f);
         }
+    }
+
+    dx::UObject* objectProperty(dx::UObject* object, const char* name)
+    {
+        dx::UProperty* property = object->cls->findProperty(dx::Name(name));
+        REQUIRE(property != nullptr);
+        return *reinterpret_cast<dx::UObject**>(object->data + property->offset);
+    }
+
+    bool startInfoLink(dx::UObject* player, const char* name)
+    {
+        dx::vm::Call call(player, dx::Name("StartDataLinkTransmission"));
+        call.s(name);
+        call.skip();
+        call.run();
+        return *reinterpret_cast<uint32_t*>(call.returnValue()) != 0;
     }
 }
 
@@ -347,6 +364,40 @@ TEST_CASE("player picks up a light decoration and throws it", "[data]")
     releaseWorld(world, "01_NYC_UNATCOIsland");
 }
 
+TEST_CASE("a carried decoration stays carried while the mouse turns the player", "[data]")
+{
+    std::unique_ptr<dx::World> world = freshWorld("01_NYC_UNATCOIsland");
+    dx::UObject* player = world->player();
+    dx::console::execute(player, "teleport -4300 10400 -259 32768");
+    tick(*world, 5);
+    dx::Vector start = dx::actor::Location(player);
+    dx::UObject* box = world->spawn(dx::objects::findClass("DeusEx.BoxSmall"), nullptr, dx::Name(), start + dx::Vector { -60, 0, -30 }, {}, nullptr, false);
+    REQUIRE(box != nullptr);
+    tick(*world, 20);
+    dx::Vector spot = dx::actor::Location(box);
+    dx::console::execute(player, "lookat " + std::to_string(spot.x) + " " + std::to_string(spot.y) + " " + std::to_string(spot.z));
+    tick(*world, 10);
+    dx::vm::Call(player, dx::Name("GrabDecoration")).run();
+    tick(*world, 10);
+    dx::UProperty* carried = player->cls->findProperty(dx::Name("CarriedDecoration"));
+    REQUIRE(*reinterpret_cast<dx::UObject**>(player->data + carried->offset) == box);
+    REQUIRE(dx::actor::Base(box) == player);
+    int32_t startYaw = dx::actor::Rotation(player).yaw;
+    for (int i = 0; i < 30; i++) {
+        dx::console::key(dx::IK_MouseX, dx::IST_Axis, 20.0f);
+        tick(*world, 1);
+    }
+    REQUIRE(dx::actor::Rotation(player).yaw != startYaw);
+    CHECK(*reinterpret_cast<dx::UObject**>(player->data + carried->offset) == box);
+    CHECK(dx::actor::Base(box) == player);
+    CHECK(dx::actor::Physics(box) == 0);
+    CHECK_FALSE(dx::actor::bCollideActors(box));
+    int32_t boxYaw = dx::vectorRotation(dx::actor::Location(box) - dx::actor::Location(player)).yaw;
+    int32_t offset = ((boxYaw & 65535) - (dx::actor::Rotation(player).yaw & 65535)) & 65535;
+    CHECK((offset <= 3072 || offset >= 62463));
+    releaseWorld(world, "01_NYC_UNATCOIsland");
+}
+
 TEST_CASE("a security camera spots the player and raises the alarm", "[data]")
 {
     std::unique_ptr<dx::World> world = freshWorld("01_NYC_UNATCOIsland");
@@ -414,5 +465,91 @@ TEST_CASE("a door's bounding box spans the faces that traces hit from both sides
     CHECK(maximum.x >= 1872.0f);
     CHECK(minimum.z <= -60.0f);
     CHECK(maximum.z >= -60.0f);
+    releaseWorld(world, "01_NYC_UNATCOIsland");
+}
+
+TEST_CASE("a queued infolink transmission shows its own HUD window", "[data]")
+{
+    std::unique_ptr<dx::World> world = freshWorld("01_NYC_UNATCOIsland");
+    dx::UObject* player = world->player();
+    tick(*world, 30);
+    dx::UObject* hud = objectProperty(objectProperty(player, "rootWindow"), "hud");
+    REQUIRE(startInfoLink(player, "DL_GateEntrance"));
+    dx::UObject* play = objectProperty(player, "dataLinkPlay");
+    REQUIRE(play != nullptr);
+    dx::UObject* firstWindow = objectProperty(hud, "infolink");
+    REQUIRE(firstWindow != nullptr);
+    tick(*world, 30);
+    REQUIRE(startInfoLink(player, "DL_Top"));
+    dx::UProperty* conName = dx::objects::findClass("ConSys.Conversation")->findProperty(dx::Name("conName"));
+    REQUIRE(conName != nullptr);
+    bool playingSecond = false;
+    for (int i = 0; i < 900 && !playingSecond; i++) {
+        tick(*world, 1);
+        dx::UObject* con = objectProperty(play, "con");
+        playingSecond = con && conName->toText(con->data + conName->offset) == "DL_Top" && dx::vm::stateName(play) == dx::Name("WaitForSpeech");
+    }
+    REQUIRE(playingSecond);
+    CHECK(firstWindow->destroyed);
+    dx::UObject* secondWindow = objectProperty(play, "datalink");
+    REQUIRE(secondWindow != nullptr);
+    CHECK_FALSE(secondWindow->destroyed);
+    CHECK(objectProperty(hud, "infolink") == secondWindow);
+    dx::UProperty* visible = secondWindow->cls->findProperty(dx::Name("bIsVisible"));
+    CHECK(visible->toText(secondWindow->data + visible->offset) == "True");
+    releaseWorld(world, "01_NYC_UNATCOIsland");
+}
+
+TEST_CASE("an infolink queued during a conversation shows its HUD window when the conversation ends", "[data]")
+{
+    std::unique_ptr<dx::World> world = freshWorld("01_NYC_UNATCOIsland");
+    dx::UObject* player = world->player();
+    tick(*world, 30);
+    dx::UObject* hud = objectProperty(objectProperty(player, "rootWindow"), "hud");
+    dx::UProperty* hudVisible = hud->cls->findProperty(dx::Name("bIsVisible"));
+    dx::UObject* paul = nullptr;
+    for (dx::UObject* a : world->actors) {
+        if (a && !a->destroyed && a->isA(dx::Name("PaulDenton"))) {
+            paul = a;
+        }
+    }
+    REQUIRE(paul != nullptr);
+    REQUIRE(startInfoLink(player, "DL_GateEntrance"));
+    dx::UObject* firstWindow = objectProperty(hud, "infolink");
+    REQUIRE(firstWindow != nullptr);
+    tick(*world, 60);
+    dx::Vector spot = dx::actor::Location(paul);
+    dx::console::execute(player, "teleport " + std::to_string(spot.x + 80) + " " + std::to_string(spot.y) + " " + std::to_string(spot.z) + " 32768");
+    dx::vm::Call conversation(player, dx::Name("StartConversationByName"));
+    conversation.n(dx::Name("MeetPaul")).obj(paul).b(false).b(false);
+    conversation.run();
+    REQUIRE(*reinterpret_cast<uint32_t*>(conversation.returnValue()) != 0);
+    dx::UObject* conPlay = objectProperty(player, "conPlay");
+    REQUIRE(conPlay != nullptr);
+    tick(*world, 30);
+    REQUIRE(hudVisible->toText(hud->data + hudVisible->offset) == "False");
+    startInfoLink(player, "DL_Top");
+    tick(*world, 30);
+    dx::UObject* play = objectProperty(player, "dataLinkPlay");
+    REQUIRE(play != nullptr);
+    REQUIRE(objectProperty(player, "conPlay") == conPlay);
+    dx::UProperty* conName = dx::objects::findClass("ConSys.Conversation")->findProperty(dx::Name("conName"));
+    dx::UObject* queued = objectProperty(play, "con");
+    REQUIRE(queued != nullptr);
+    REQUIRE(conName->toText(queued->data + conName->offset) == "DL_Top");
+    dx::vm::Call(conPlay, dx::Name("TerminateConversation")).run();
+    for (int i = 0; i < 300 && objectProperty(player, "conPlay"); i++) {
+        tick(*world, 1);
+        dx::extension::tick(1.0f / 30.0f);
+    }
+    REQUIRE(objectProperty(player, "conPlay") == nullptr);
+    CHECK(firstWindow->destroyed);
+    CHECK(hudVisible->toText(hud->data + hudVisible->offset) == "True");
+    dx::UObject* window = objectProperty(play, "datalink");
+    REQUIRE(window != nullptr);
+    CHECK_FALSE(window->destroyed);
+    CHECK(objectProperty(hud, "infolink") == window);
+    dx::UProperty* windowVisible = window->cls->findProperty(dx::Name("bIsVisible"));
+    CHECK(windowVisible->toText(window->data + windowVisible->offset) == "True");
     releaseWorld(world, "01_NYC_UNATCOIsland");
 }

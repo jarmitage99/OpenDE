@@ -587,7 +587,7 @@ namespace dx::extension {
         detachFromParent();
         if (owner) {
             owner->childRemoved(this);
-            for (UWindow* ancestor = owner->parent(); ancestor; ancestor = ancestor->parent()) {
+            for (UWindow* ancestor = owner; ancestor; ancestor = ancestor->parent()) {
                 ancestor->descendantRemoved(this);
             }
             window::bNeedsReconfigure(owner) = 1;
