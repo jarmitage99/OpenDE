@@ -80,7 +80,7 @@ namespace dx {
         std::vector<CheckResult> multiLineCheck(const Vector& start, const Vector& end, const Vector& extent, UObject* source, uint32_t flags, uint8_t nodeFlags = 0);
         bool bspLineCheck(CheckResult& hit, const Vector& start, const Vector& end, const Vector& extent, uint8_t nodeFlags = 0);
         bool fastLineCheck(const Vector& end, const Vector& start);
-        bool encroaches(UObject* actor, const Vector& location);
+        bool encroaches(UObject* actor, const Vector& location, bool touchNotify = false);
         bool moveActor(UObject* actor, const Vector& delta, const Rotator& rotation, CheckResult& hit, bool test, bool ignorePawns, bool ignoreBases, bool noFail);
         bool farMoveActor(UObject* actor, const Vector& location, bool test, bool noCheck);
         void setLocationZone(UObject* actor, const Vector& location, bool test = false);

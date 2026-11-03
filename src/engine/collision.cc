@@ -954,7 +954,7 @@ namespace dx {
         return false;
     }
 
-    bool World::encroaches(UObject* a, const Vector& location)
+    bool World::encroaches(UObject* a, const Vector& location, bool touchNotify)
     {
         if (!actor::bCollideActors(a) && !actor::bBlockActors(a) && !actor::bBlockPlayers(a) && !isMovingBrush(a)) {
             return false;
@@ -1016,9 +1016,19 @@ namespace dx {
                 }
             }
         }
+        if (touchNotify) {
+            for (int i = 0; i < 4; i++) {
+                UObject* touching = actor::Touching(a, i);
+                if (touching && !isOverlapping(a, touching)) {
+                    endTouch(a, touching, false);
+                }
+            }
+        }
         for (UObject* other : encroached) {
             if (isBlockedBy(a, other)) {
                 vm::Call(other, Name("EncroachedBy")).obj(a).run();
+            } else if (touchNotify) {
+                beginTouch(a, other);
             }
         }
         return false;
@@ -1035,7 +1045,10 @@ namespace dx {
             result = findSpot(cylinderExtent(a), newLocation, false, false);
         }
         if (result && !test && !noCheck) {
-            result = !encroaches(a, newLocation);
+            result = !encroaches(a, newLocation, !objects::editorMode());
+            if (a->destroyed) {
+                return false;
+            }
         }
         if (result) {
             if (!test) {

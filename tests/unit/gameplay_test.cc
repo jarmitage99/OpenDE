@@ -553,3 +553,51 @@ TEST_CASE("an infolink queued during a conversation shows its HUD window when th
     CHECK(windowVisible->toText(window->data + windowVisible->offset) == "True");
     releaseWorld(world, "01_NYC_UNATCOIsland");
 }
+
+TEST_CASE("moving the player into a datalink trigger with SetLocation starts its transmission", "[data]")
+{
+    std::unique_ptr<dx::World> world = freshWorld("01_NYC_UNATCOIsland");
+    dx::UObject* player = world->player();
+    tick(*world, 5);
+    dx::UObject* hud = objectProperty(objectProperty(player, "rootWindow"), "hud");
+    dx::UObject* trigger = findActor(*world, "DataLinkTrigger0");
+    REQUIRE(trigger != nullptr);
+    dx::Vector start = dx::actor::Location(player);
+    dx::Vector inside = dx::actor::Location(trigger);
+    inside.z = start.z;
+    REQUIRE((start - inside).size2D() > dx::actor::CollisionRadius(trigger) + dx::actor::CollisionRadius(player));
+    auto touches = [](dx::UObject* actor, dx::UObject* other) {
+        for (int i = 0; i < 4; i++) {
+            if (dx::actor::Touching(actor, i) == other) {
+                return true;
+            }
+        }
+        return false;
+    };
+    REQUIRE(world->farMoveActor(player, inside, true, false));
+    CHECK_FALSE(touches(player, trigger));
+    CHECK(objectProperty(player, "dataLinkPlay") == nullptr);
+    REQUIRE(world->farMoveActor(player, start, false, true));
+    dx::objects::setEditorMode(true);
+    bool movedInEditor = world->farMoveActor(player, inside, false, false);
+    dx::objects::setEditorMode(false);
+    REQUIRE(movedInEditor);
+    CHECK_FALSE(touches(player, trigger));
+    CHECK(objectProperty(player, "dataLinkPlay") == nullptr);
+    REQUIRE(world->farMoveActor(player, start, false, true));
+    dx::vm::Call move(player, dx::Name("SetLocation"));
+    move.v(inside);
+    move.run();
+    REQUIRE(*reinterpret_cast<uint32_t*>(move.returnValue()) != 0);
+    CHECK(touches(player, trigger));
+    CHECK(touches(trigger, player));
+    dx::UObject* play = objectProperty(player, "dataLinkPlay");
+    REQUIRE(play != nullptr);
+    dx::UProperty* conName = dx::objects::findClass("ConSys.Conversation")->findProperty(dx::Name("conName"));
+    dx::UObject* con = objectProperty(play, "con");
+    REQUIRE(con != nullptr);
+    CHECK(conName->toText(con->data + conName->offset) == "DL_StartGame");
+    CHECK(objectProperty(hud, "infolink") == objectProperty(play, "datalink"));
+    CHECK(objectProperty(play, "datalink") != nullptr);
+    releaseWorld(world, "01_NYC_UNATCOIsland");
+}
