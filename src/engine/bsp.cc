@@ -443,15 +443,14 @@ namespace dx {
                     int splits = 0;
                     int front = 0;
                     int back = 0;
-                    int index = i - 1;
-                    Poly* poly = nullptr;
-                    do {
+                    int index = i;
+                    while (index < (i + inc) && index < numPolys && (list[static_cast<size_t>(index)]->polyFlags & PF_AddLast) && !allSemiSolids) {
                         index++;
-                        poly = list[static_cast<size_t>(index)];
-                    } while (index < (i + inc) && index < numPolys && (poly->polyFlags & PF_AddLast) && !allSemiSolids);
+                    }
                     if (index >= i + inc || index >= numPolys) {
                         continue;
                     }
+                    Poly* poly = list[static_cast<size_t>(index)];
                     for (int j = 0; j < numPolys; j += inc) {
                         if (j == index) {
                             continue;
