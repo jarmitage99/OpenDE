@@ -65,6 +65,7 @@ namespace dx::editor {
             return false;
         }
         std::fflush(stderr);
+        std::setvbuf(stderr, nullptr, _IONBF, 0);
         original = DX_DUP(2);
         DX_DUP2(fds[1], 2);
         DX_CLOSE(fds[1]);
@@ -95,8 +96,9 @@ namespace dx::editor {
     {
         char buffer[4096];
         while (true) {
+            bool finishing = stopping;
             if (!readable(pipeRead)) {
-                if (stopping) {
+                if (finishing) {
                     break;
                 }
                 continue;
@@ -106,7 +108,8 @@ namespace dx::editor {
                 break;
             }
             size_t size = static_cast<size_t>(count);
-            static_cast<void>(DX_WRITE(original, buffer, size));
+            auto written = DX_WRITE(original, buffer, size);
+            static_cast<void>(written);
             std::lock_guard<std::mutex> lock(mutex);
             for (size_t i = 0; i < size; i++) {
                 if (buffer[i] == '\n') {
