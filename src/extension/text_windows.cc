@@ -377,9 +377,32 @@ namespace dx::extension {
         if (toggled == value) {
             return;
         }
-        toggled = value;
+        setToggled(value);
         playWindowSound(value ? togglewindow::enableSound(this) : togglewindow::disableSound(this));
         bubbleToggle(this, value);
+    }
+
+    void UToggleWindow::setToggled(bool value)
+    {
+        toggled = value;
+        buttonwindow::bButtonPressed(this) = value ? 1 : 0;
+    }
+
+    void UToggleWindow::mouseMoved(float newX, float newY)
+    {
+        UButtonWindow::mouseMoved(newX, newY);
+        if (toggled) {
+            buttonwindow::bButtonPressed(this) = 1;
+        }
+    }
+
+    bool UToggleWindow::mouseButtonReleased(float pointX, float pointY, uint8_t button, int32_t numClicks)
+    {
+        bool handled = UButtonWindow::mouseButtonReleased(pointX, pointY, button, numClicks);
+        if (!destroyed && toggled) {
+            buttonwindow::bButtonPressed(this) = 1;
+        }
+        return handled;
     }
 
     void UToggleWindow::activate(uint8_t key)

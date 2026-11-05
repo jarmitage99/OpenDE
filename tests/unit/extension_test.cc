@@ -403,6 +403,56 @@ TEST_CASE("Clicking a checkbox inside a modal window toggles it", "[data]")
     }
 }
 
+TEST_CASE("A toggled toggle window stays pressed through clicks and radio group changes", "[data]")
+{
+    dx::UObject* root = makeRoot();
+    dx::UObject* modal = newChild(root, "Extension.ModalWindow");
+    {
+        dx::vm::Call call(modal, dx::Name("SetWindowAlignments"));
+        call.byte(3).byte(3);
+        call.run();
+    }
+    dx::UObject* toggle = newChild(modal, "Extension.ToggleWindow");
+    setPos(toggle, 100, 100);
+    setSize(toggle, 40, 20);
+    layout(800, 600);
+    auto setToggle = [](dx::UObject* window, bool value) {
+        dx::vm::Call call(window, dx::Name("SetToggle"));
+        call.b(value);
+        call.run();
+    };
+    CHECK(dx::buttonwindow::bButtonPressed(toggle) == 0);
+    setToggle(toggle, true);
+    CHECK(dx::buttonwindow::bButtonPressed(toggle) != 0);
+    setToggle(toggle, false);
+    CHECK(dx::buttonwindow::bButtonPressed(toggle) == 0);
+
+    dx::extension::mouseMove(110, 110);
+    dx::extension::mouseButton(dx::IK_LeftMouse, true);
+    dx::extension::mouseButton(dx::IK_LeftMouse, false);
+    CHECK(dx::buttonwindow::bButtonPressed(toggle) != 0);
+
+    dx::extension::mouseButton(dx::IK_LeftMouse, true);
+    dx::extension::mouseMove(300, 300);
+    CHECK(dx::buttonwindow::bButtonPressed(toggle) != 0);
+    dx::extension::mouseButton(dx::IK_LeftMouse, false);
+    CHECK(dx::buttonwindow::bButtonPressed(toggle) != 0);
+
+    dx::extension::mouseMove(110, 110);
+    dx::extension::mouseButton(dx::IK_LeftMouse, true);
+    dx::extension::mouseButton(dx::IK_LeftMouse, false);
+    CHECK(dx::buttonwindow::bButtonPressed(toggle) == 0);
+
+    dx::UObject* radio = newChild(modal, "Extension.RadioBoxWindow");
+    dx::UObject* first = newChild(radio, "Extension.ToggleWindow");
+    dx::UObject* second = newChild(radio, "Extension.ToggleWindow");
+    setToggle(first, true);
+    CHECK(dx::buttonwindow::bButtonPressed(first) != 0);
+    setToggle(second, true);
+    CHECK(dx::buttonwindow::bButtonPressed(first) == 0);
+    CHECK(dx::buttonwindow::bButtonPressed(second) != 0);
+}
+
 TEST_CASE("FlagBase stores typed flags and deletes expired ones", "[data]")
 {
     initializeEngine();

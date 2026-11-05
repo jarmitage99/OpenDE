@@ -625,7 +625,7 @@ namespace dx::extension {
                 for (UWindow* child = current->firstChild(); child; child = child->nextSibling()) {
                     UToggleWindow* other = cast<UToggleWindow>(child);
                     if (other && other != toggle && other->toggled) {
-                        other->toggled = false;
+                        other->setToggled(false);
                     }
                     pending.push_back(child);
                 }
@@ -634,7 +634,7 @@ namespace dx::extension {
             return true;
         }
         if (toggle && !newToggle && radioboxwindow::currentSelection(this) == toggle && radioboxwindow::bOneCheck(this)) {
-            toggle->toggled = true;
+            toggle->setToggled(true);
             return true;
         }
         return UWindow::toggleChanged(button, newToggle);

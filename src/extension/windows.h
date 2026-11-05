@@ -219,8 +219,11 @@ namespace dx::extension {
 
     class UToggleWindow : public UButtonWindow {
     public:
+        void mouseMoved(float newX, float newY) override;
+        bool mouseButtonReleased(float pointX, float pointY, uint8_t button, int32_t numClicks) override;
         void activate(uint8_t key) override;
         void setToggle(bool value);
+        void setToggled(bool value);
 
         bool toggled = false;
     };

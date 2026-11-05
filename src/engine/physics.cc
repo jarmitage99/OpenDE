@@ -36,19 +36,15 @@ namespace dx {
             }
             flat = flat.normal();
             float reach = actor::CollisionRadius(a) + 16.0f;
-            for (float offset : { 0.0f, 4.0f - actor::CollisionHeight(a) }) {
-                Vector location = actor::Location(a) + Vector { 0, 0, offset };
-                CheckResult hit;
-                world().lineCheck(hit, location, location + flat * reach, {}, a, TRACE_World);
-                if (hit.time >= 1.0f || !hit.material || std::abs(hit.normal.z) > 0.3f || flat.dot(hit.normal) > -0.3f) {
-                    continue;
-                }
-                UObject* group = hit.material->outer;
-                if (group && group->outer && group->name == Name("Ladder")) {
-                    return true;
-                }
+            float halfSpan = (actor::CollisionHeight(a) - 4.0f) * 0.5f;
+            Vector location = actor::Location(a) - Vector { 0, 0, halfSpan };
+            CheckResult hit;
+            world().lineCheck(hit, location, location + flat * reach, { 1.0f, 1.0f, halfSpan }, a, TRACE_World);
+            if (hit.time >= 1.0f || !hit.material || std::abs(hit.normal.z) > 0.3f || flat.dot(hit.normal) > -0.3f) {
+                return false;
             }
-            return false;
+            UObject* group = hit.material->outer;
+            return group && group->outer && group->name == Name("Ladder");
         }
 
         void climbLadder(UObject* a, float tick, float speed)

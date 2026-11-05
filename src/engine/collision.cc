@@ -503,14 +503,14 @@ namespace dx {
             return true;
         }
 
-        bool brushTrace(UObject* a, const Vector& start, const Vector& end, const Vector& extent, float& time, Vector& normal)
+        bool brushTrace(UObject* a, const Vector& start, const Vector& end, const Vector& extent, float& time, Vector& normal, int32_t* hitNode = nullptr)
         {
             UModel* model = cast<UModel>(actor::Brush(a));
             if (!model) {
                 return false;
             }
             BrushTransform t = brushTransform(a);
-            return modelTrace(model, &t, start, end, extent, time, normal);
+            return modelTrace(model, &t, start, end, extent, time, normal, hitNode);
         }
 
         bool brushOverlap(UObject* a, const Vector& center, const Vector& extent)
@@ -837,8 +837,9 @@ namespace dx {
                 float time = 1;
                 Vector normal;
                 bool collided = false;
+                int32_t node = -1;
                 if (brush) {
-                    collided = brushTrace(other, start, actorEnd, extent, time, normal);
+                    collided = brushTrace(other, start, actorEnd, extent, time, normal, &node);
                 } else {
                     collided = cylinderTrace(other, start, actorEnd, extent, time, normal);
                 }
@@ -848,6 +849,7 @@ namespace dx {
                     hit.time = time * dilation;
                     hit.normal = normal;
                     hit.location = start + (actorEnd - start) * time;
+                    hit.item = node;
                     if (!hits.empty() && hits.front().actor == levelInfo && isMover(other) && (hit.normal - hits.front().normal).sizeSquared() < 1e-6f && (hit.location - hits.front().location).sizeSquared() < 4.0f) {
                         Vector direction = (actorEnd - start).normal();
                         hit.location = hits.front().location - direction * 2.0f;

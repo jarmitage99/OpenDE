@@ -514,8 +514,8 @@ namespace dx {
                     *texName = Name();
                     *texGroup = Name();
                     *flags = 0;
-                    UModel* model = world().level ? world().level->model : nullptr;
-                    if (hit.item >= 0 && model && hit.actor->isA(engineClasses().levelInfo) && static_cast<size_t>(hit.item) < model->nodes.size()) {
+                    UModel* model = hit.actor->isA(engineClasses().levelInfo) ? (world().level ? world().level->model : nullptr) : cast<UModel>(actor::Brush(hit.actor));
+                    if (hit.item >= 0 && model && static_cast<size_t>(hit.item) < model->nodes.size()) {
                         int32_t surf = model->nodes[static_cast<size_t>(hit.item)].surf;
                         if (surf >= 0 && static_cast<size_t>(surf) < model->surfs.size()) {
                             const BspSurf& face = model->surfs[static_cast<size_t>(surf)];

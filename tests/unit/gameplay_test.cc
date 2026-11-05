@@ -5,6 +5,7 @@
 #include "engine/console.h"
 #include "engine/input.h"
 #include "engine/props_engine.h"
+#include "engine/props_extension.h"
 #include "engine/world.h"
 #include "extension/extension.h"
 
@@ -599,5 +600,84 @@ TEST_CASE("moving the player into a datalink trigger with SetLocation starts its
     CHECK(conName->toText(con->data + conName->offset) == "DL_StartGame");
     CHECK(objectProperty(hud, "infolink") == objectProperty(play, "datalink"));
     CHECK(objectProperty(play, "datalink") != nullptr);
+    releaseWorld(world, "01_NYC_UNATCOIsland");
+}
+
+TEST_CASE("player climbs the rung ladder out of the pit under the satcom hatch", "[data]")
+{
+    std::unique_ptr<dx::World> world = freshWorld("01_NYC_UNATCOIsland");
+    dx::UObject* player = world->player();
+    dx::UObject* hatch = findActor(*world, "DeusExMover7");
+    REQUIRE(hatch != nullptr);
+    REQUIRE(dx::actor::Tag(hatch) == dx::Name("satcomhatch"));
+    dx::vm::Call(hatch, dx::Name("DoOpen")).run();
+    tick(*world, 90);
+    dx::console::execute(player, "teleport -6384 1460 -250 16384");
+    tick(*world, 20);
+    float floorZ = dx::actor::Location(player).z;
+    REQUIRE(floorZ < -230.0f);
+    uint8_t forward = dx::console::keyFromName("W");
+    dx::console::key(forward, dx::IST_Press, 0);
+    tick(*world, 30);
+    dx::console::key(forward, dx::IST_Release, 0);
+    float heldZ = dx::actor::Location(player).z;
+    CHECK(heldZ > floorZ + 40.0f);
+    CHECK(heldZ < -130.0f);
+    tick(*world, 30);
+    CHECK(dx::actor::Location(player).z == Catch::Approx(heldZ).margin(1.0f));
+    dx::pawn::ViewRotation(player).pitch = 50000;
+    dx::console::key(forward, dx::IST_Press, 0);
+    tick(*world, 15);
+    dx::console::key(forward, dx::IST_Release, 0);
+    CHECK(dx::actor::Location(player).z < heldZ - 20.0f);
+    dx::pawn::ViewRotation(player).pitch = 0;
+    dx::console::key(forward, dx::IST_Press, 0);
+    tick(*world, 90);
+    dx::console::key(forward, dx::IST_Release, 0);
+    tick(*world, 10);
+    dx::Vector surface = dx::actor::Location(player);
+    CHECK(surface.y > 1503.0f);
+    CHECK(surface.z == Catch::Approx(-80.3f).margin(2.0f));
+    CHECK(dx::actor::Physics(player) == 1);
+    releaseWorld(world, "01_NYC_UNATCOIsland");
+}
+
+TEST_CASE("the belt slot of the item in hand draws its selection border", "[data]")
+{
+    std::unique_ptr<dx::World> world = freshWorld("01_NYC_UNATCOIsland");
+    dx::UObject* player = world->player();
+    tick(*world, 5);
+    dx::UObject* belt = objectProperty(objectProperty(objectProperty(player, "rootWindow"), "hud"), "belt");
+    REQUIRE(belt != nullptr);
+    auto slot = [&](int index) {
+        return *reinterpret_cast<dx::UObject**>(belt->propertyAddress(dx::Name("objects"), index));
+    };
+    REQUIRE(objectProperty(slot(0), "item") == objectProperty(player, "KeyRing"));
+    REQUIRE(objectProperty(player, "KeyRing") != nullptr);
+    CHECK(dx::buttonwindow::bButtonPressed(slot(0)) == 0);
+    dx::console::execute(player, "ActivateBelt 0");
+    tick(*world, 60);
+    REQUIRE(objectProperty(player, "inHand") == objectProperty(player, "KeyRing"));
+    CHECK(dx::buttonwindow::bButtonPressed(slot(0)) != 0);
+    CHECK(dx::buttonwindow::bButtonPressed(slot(1)) == 0);
+    dx::console::execute(player, "PutInHand");
+    tick(*world, 60);
+    REQUIRE(objectProperty(player, "inHand") == nullptr);
+    CHECK(dx::buttonwindow::bButtonPressed(slot(0)) == 0);
+    releaseWorld(world, "01_NYC_UNATCOIsland");
+}
+
+TEST_CASE("the player's floor material comes from the mover being stood on", "[data]")
+{
+    std::unique_ptr<dx::World> world = freshWorld("01_NYC_UNATCOIsland");
+    dx::UObject* player = world->player();
+    dx::UObject* hatch = findActor(*world, "DeusExMover7");
+    REQUIRE(hatch != nullptr);
+    dx::console::execute(player, "teleport -6384 1420 -70 16384");
+    tick(*world, 15);
+    REQUIRE(dx::actor::Base(player) == hatch);
+    dx::vm::Call call(player, dx::Name("GetFloorMaterial"));
+    call.run();
+    CHECK(reinterpret_cast<dx::Name*>(call.returnValue())->str() == "Mobile_Camp");
     releaseWorld(world, "01_NYC_UNATCOIsland");
 }
