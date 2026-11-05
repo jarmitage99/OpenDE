@@ -1080,6 +1080,26 @@ namespace dx::extension {
         runVoid(call);
     }
 
+    UObject* UWindow::cursorRequested(UWindow* win, float pointX, float pointY, float& hotX, float& hotY, Color& color, UObject*& shadow)
+    {
+        static const Name eventName("CursorRequested");
+        vm::Call call(this, eventName);
+        if (!call.valid() || !call.parameter(6) || !call.returnValue()) {
+            return nullptr;
+        }
+        call.obj(win).f(pointX).f(pointY).f(hotX).f(hotY).skip().obj(shadow);
+        *reinterpret_cast<Color*>(call.parameter(5)) = color;
+        call.run();
+        UObject* cursor = *reinterpret_cast<UObject**>(call.returnValue());
+        if (cursor) {
+            hotX = *reinterpret_cast<float*>(call.parameter(3));
+            hotY = *reinterpret_cast<float*>(call.parameter(4));
+            color = *reinterpret_cast<Color*>(call.parameter(5));
+            shadow = *reinterpret_cast<UObject**>(call.parameter(6));
+        }
+        return cursor;
+    }
+
     bool UWindow::rawMouseButtonPressed(float pointX, float pointY, uint8_t button, uint8_t inputState)
     {
         static const Name eventName("RawMouseButtonPressed");
@@ -1648,9 +1668,16 @@ namespace dx::extension {
         UObject* cursor = nullptr;
         UObject* shadow = nullptr;
         Color color { 255, 255, 255, 255 };
-        float hotX = 0;
-        float hotY = 0;
-        for (UWindow* current = focus; current; current = current->parent()) {
+        float hotX = -1;
+        float hotY = -1;
+        float pointX = relativeX;
+        float pointY = relativeY;
+        for (UWindow* current = focus; current && !cursor; current = current->parent()) {
+            cursor = current->cursorRequested(focus, pointX, pointY, hotX, hotY, color, shadow);
+            pointX += current->usedX;
+            pointY += current->usedY;
+        }
+        for (UWindow* current = focus; current && !cursor; current = current->parent()) {
             if (window::defaultCursor(current)) {
                 cursor = window::defaultCursor(current);
                 shadow = window::defaultCursorShadow(current);

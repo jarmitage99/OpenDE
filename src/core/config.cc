@@ -289,6 +289,9 @@ namespace dx {
             if (const char* value = std::getenv("DEUSEX_GAME_DATA")) {
                 candidates.emplace_back(value);
             }
+            if (const char* value = std::getenv("APPIMAGE")) {
+                candidates.push_back(std::filesystem::path(value).parent_path() / "game-data");
+            }
             if (char* base = SDL_GetBasePath()) {
                 candidates.push_back(fromUtf8(base) / "game-data");
             }

@@ -624,3 +624,53 @@ TEST_CASE("ucc make compiles an authored .con with every event type into a conve
     CHECK(reference(bound, "Next") == nullptr);
     std::filesystem::remove_all(home);
 }
+
+TEST_CASE("a conversation shared through BarkBindName counts every owner so the invoker is rebound", "[data]")
+{
+    dx::engine::initialize(DEUSEX_GAME_DATA);
+    dx::World world;
+    dx::UObject* level = dx::objects::packageObject(dx::Name("ConBindLevel"));
+    dx::UObject* info = dx::objects::newObject(dx::objects::findClass("DeusEx.DeusExLevelInfo"), level, dx::Name(), 0);
+    field<std::string>(info, "ConversationPackage") = "DeusExConversations";
+    field<int32_t>(info, "missionNumber") = 1;
+    world.actors.push_back(info);
+    dx::deusex::levelLoaded(world);
+    dx::UClass* troopClass = dx::objects::findClass("DeusEx.UNATCOTroop");
+    dx::UObject* generic = dx::objects::newObject(troopClass, level, dx::Name(), 0);
+    field<std::string>(generic, "BindName") = "UNATCOTroop";
+    dx::UObject* collins = dx::objects::newObject(troopClass, level, dx::Name(), 0);
+    field<std::string>(collins, "BindName") = "CorporalCollins";
+    field<std::string>(collins, "BarkBindName") = "UNATCOTroop";
+    world.actors.push_back(generic);
+    world.actors.push_back(collins);
+    dx::vm::Call(generic, dx::Name("ConBindEvents")).run();
+    dx::vm::Call(collins, dx::Name("ConBindEvents")).run();
+    dx::UObject* shared = nullptr;
+    dx::UObject* own = nullptr;
+    for (dx::UObject* item = reference(collins, "ConListItems"); item; item = reference(item, "Next")) {
+        dx::UObject* con = reference(item, "con");
+        if (nameText(con, "conName") == "UNATCOTroopInitialBarks") {
+            shared = con;
+        }
+        if (nameText(con, "conName") == "CollinsDockBarks") {
+            own = con;
+        }
+    }
+    REQUIRE(shared != nullptr);
+    REQUIRE(own != nullptr);
+    CHECK(field<int32_t>(own, "ownerRefCount") == 1);
+    CHECK(field<int32_t>(shared, "ownerRefCount") == 2);
+    dx::vm::Call bind(shared, dx::Name("BindEvents"));
+    bind.skip();
+    bind.obj(collins);
+    bind.run();
+    if (field<int32_t>(shared, "ownerRefCount") > 1) {
+        dx::vm::Call(shared, dx::Name("BindActorEvents")).obj(collins).run();
+    }
+    dx::UObject* speech = reference(shared, "eventList");
+    while (speech && !speech->isA(dx::Name("ConEventSpeech"))) {
+        speech = reference(speech, "nextEvent");
+    }
+    REQUIRE(speech != nullptr);
+    CHECK(reference(speech, "speaker") == collins);
+}

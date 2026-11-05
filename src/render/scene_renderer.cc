@@ -2758,6 +2758,9 @@ namespace dx {
                     environmentCoords(meshWorld[index] - view.location, meshNormals[index], vertex.u, vertex.v);
                 }
                 Vector color = unlit ? Vector { clampedGlow, clampedGlow, clampedGlow } : lit[index];
+                if (flags & PF_Modulated) {
+                    color = { 1, 1, 1 };
+                }
                 vertex.r = std::min(color.x, 1.0f);
                 vertex.g = std::min(color.y, 1.0f);
                 vertex.b = std::min(color.z, 1.0f);

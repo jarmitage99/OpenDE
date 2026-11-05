@@ -71,8 +71,17 @@ namespace dx {
             UObject* mission = state().mission;
             UClass* listItemClass = objects::findClass("ConSys.ConListItem");
             UObject* head = nullptr;
+            for (UObject* item = objectField(self, "ConListItems"); item; item = objectField(item, "Next")) {
+                UObject* bound = objectField(item, "con");
+                if (bound && conversation::ownerRefCount(bound) > 0) {
+                    conversation::ownerRefCount(bound)--;
+                }
+            }
             if (mission && listItemClass) {
                 std::string names[2] = { stringField(self, "BindName"), stringField(self, "BarkBindName") };
+                if (iequals(names[0], names[1])) {
+                    names[1].clear();
+                }
                 for (const std::string& bindName : names) {
                     if (bindName.empty()) {
                         continue;
@@ -86,6 +95,7 @@ namespace dx {
                         if (!iequals(stringField(conversation, "conOwnerName"), bindName)) {
                             continue;
                         }
+                        conversation::ownerRefCount(conversation)++;
                         UObject* entry = objects::newObject(listItemClass, objects::packageObject(Name("Transient")), Name(), RF_Transient);
                         *reinterpret_cast<UObject**>(field(entry, "con")) = conversation;
                         *reinterpret_cast<UObject**>(field(entry, "Next")) = head;
@@ -684,6 +694,7 @@ namespace dx {
                     continue;
                 }
                 objects::ensureLoaded(conversation);
+                conversation::ownerRefCount(conversation) = 0;
                 uint8_t* eventList = field(conversation, "eventList");
                 if (!eventList) {
                     continue;

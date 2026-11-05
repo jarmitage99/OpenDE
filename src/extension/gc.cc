@@ -520,6 +520,10 @@ namespace dx::extension {
         if (bottom > clipBottom) {
             bottom = clipBottom;
         }
+        left = std::floor(left);
+        top = std::floor(top);
+        right = std::floor(right);
+        bottom = std::floor(bottom);
         if (right <= left || bottom <= top) {
             return;
         }

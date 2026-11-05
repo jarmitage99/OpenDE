@@ -36,9 +36,9 @@ The Deus Ex demo (version 1002f) works too, for example
 
 At runtime the game and the editor look for the data in this order: the
 `DEUSEX_GAME_DATA` environment variable, a `game-data` directory next to the
-executable, the Steam install of Deus Ex (`steamapps/common/Deus Ex` in the
-default Steam directories and their library folders), and finally the path
-given at configure time.
+executable (next to the AppImage file for AppImage builds), the Steam install
+of Deus Ex (`steamapps/common/Deus Ex` in the default Steam directories and
+their library folders), and finally the path given at configure time.
 
 ## Building
 

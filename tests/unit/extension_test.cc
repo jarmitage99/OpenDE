@@ -286,6 +286,33 @@ TEST_CASE("Window background is drawn at its position scaled by the virtual reso
     CHECK(large.tiles[0].ul == 64.0f);
 }
 
+TEST_CASE("Window background at a half pixel position is drawn on whole pixels", "[data]")
+{
+    dx::UObject* root = makeRoot();
+    dx::UObject* window = newChild(root, "Extension.Window");
+    dx::UObject* texture = dx::objects::loadObject("Engine.DefaultTexture", nullptr);
+    REQUIRE(dx::cast<dx::UTexture>(texture) != nullptr);
+    {
+        dx::vm::Call call(window, dx::Name("SetBackground"));
+        call.obj(texture);
+        call.run();
+    }
+    setPos(window, 392.5f, 292.5f);
+    setSize(window, 16, 16);
+
+    RecordingCanvas canvas(800, 600);
+    dx::extension::render(canvas);
+    REQUIRE(canvas.tiles.size() == 1);
+    CHECK(canvas.tiles[0].x == 392.0f);
+    CHECK(canvas.tiles[0].y == 292.0f);
+    CHECK(canvas.tiles[0].w == 16.0f);
+    CHECK(canvas.tiles[0].h == 16.0f);
+    CHECK(canvas.tiles[0].u == 0.0f);
+    CHECK(canvas.tiles[0].v == 0.0f);
+    CHECK(canvas.tiles[0].ul == 16.0f);
+    CHECK(canvas.tiles[0].vl == 16.0f);
+}
+
 TEST_CASE("Full width window background covers an ultrawide screen while children stay in the 16:9 area", "[data]")
 {
     dx::UObject* root = makeRoot();
@@ -1262,6 +1289,50 @@ TEST_CASE("Keys only reach windows while a modal window has grabbed the keyboard
         dx::vm::Call call(inner, dx::Name("GetToggle"));
         CHECK(boolResult(call));
     }
+}
+
+TEST_CASE("The cursor shows the icon of an inventory button while it is being dragged", "[data]")
+{
+    dx::UObject* root = makeRoot("DeusEx.DeusExRootWindow");
+    voidCall(root, "DestroyAllChildren");
+    dx::UObject* modal = newChild(root, "Extension.ModalWindow");
+    {
+        dx::vm::Call call(modal, dx::Name("SetWindowAlignments"));
+        call.byte(3).byte(3);
+        call.run();
+    }
+    dx::UClass* medkit = dx::objects::findClass("DeusEx.MedKit");
+    REQUIRE(medkit != nullptr);
+    dx::objects::ensureLoaded(medkit);
+    REQUIRE(medkit->defaultObject != nullptr);
+    dx::UObject* icon = *reinterpret_cast<dx::UObject**>(medkit->defaultObject->propertyAddress(dx::Name("largeIcon")));
+    REQUIRE(icon != nullptr);
+    dx::UObject* button = newChild(modal, "DeusEx.PersonaInventoryItemButton");
+    setPos(button, 80, 180);
+    {
+        dx::vm::Call call(button, dx::Name("SetIcon"));
+        call.obj(icon);
+        call.run();
+    }
+    {
+        dx::vm::Call call(button, dx::Name("SetIconSize"));
+        call.i(39).i(46);
+        call.run();
+    }
+    layout(800, 600);
+    dx::extension::mouseMove(100, 200);
+    voidCall(button, "StartButtonDrag");
+    RecordingCanvas canvas(800, 600);
+    dx::extension::render(canvas);
+    const RecordedTile* dragged = nullptr;
+    for (const RecordedTile& tile : canvas.tiles) {
+        if (tile.texture == icon) {
+            dragged = &tile;
+        }
+    }
+    REQUIRE(dragged != nullptr);
+    CHECK(dragged->x == 81.0f);
+    CHECK(dragged->y == 177.0f);
 }
 
 TEST_CASE("A cursor set without a hot spot is centered on the mouse position", "[data]")

@@ -72,6 +72,7 @@ namespace dx::extension {
         virtual void mouseMoved(float newX, float newY);
         virtual void mouseEnteredWindow();
         virtual void mouseLeftWindow();
+        UObject* cursorRequested(UWindow* win, float pointX, float pointY, float& hotX, float& hotY, Color& color, UObject*& shadow);
         virtual bool rawMouseButtonPressed(float pointX, float pointY, uint8_t button, uint8_t inputState);
         virtual bool mouseButtonPressed(float pointX, float pointY, uint8_t button, int32_t numClicks);
         virtual bool mouseButtonReleased(float pointX, float pointY, uint8_t button, int32_t numClicks);

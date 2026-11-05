@@ -6,12 +6,28 @@
 
 #include <catch_amalgamated.hpp>
 
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <initializer_list>
 #include <string>
 #include <vector>
 
 namespace {
+    void setEnvironment(const char* name, const char* value)
+    {
+#ifdef _WIN32
+        _putenv_s(name, value);
+#else
+        if (*value) {
+            setenv(name, value, 1);
+        } else {
+            unsetenv(name);
+        }
+#endif
+    }
+
     void initEngine()
     {
         static bool initialized = false;
@@ -477,4 +493,20 @@ TEST_CASE("a subclass created at runtime inherits the parent's defaults, functio
     CHECK(object->isA(parent));
     CHECK(xnum(object) == 777);
     CHECK(*reinterpret_cast<std::string*>(object->propertyAddress(dx::Name("sxx"))) == "Tim");
+}
+
+TEST_CASE("findGameRoot looks for game-data next to the AppImage")
+{
+    std::filesystem::path base = std::filesystem::temp_directory_path() / "deusex-appimage-test";
+    std::filesystem::create_directories(base / "game-data" / "System");
+    std::ofstream marker(base / "game-data" / "System" / "DeusEx.u");
+    marker.close();
+    std::string previous = std::getenv("DEUSEX_GAME_DATA") ? std::getenv("DEUSEX_GAME_DATA") : "";
+    setEnvironment("DEUSEX_GAME_DATA", (base / "missing").string().c_str());
+    setEnvironment("APPIMAGE", (base / "deusex.AppImage").string().c_str());
+    std::filesystem::path root = dx::config::findGameRoot("fallback");
+    setEnvironment("APPIMAGE", "");
+    setEnvironment("DEUSEX_GAME_DATA", previous.c_str());
+    std::filesystem::remove_all(base);
+    CHECK(root == base / "game-data");
 }
