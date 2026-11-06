@@ -34,7 +34,11 @@ namespace dx {
     namespace config {
         std::filesystem::path findGameRoot(const std::filesystem::path& fallback);
         std::filesystem::path userDirectory();
-        void initialize(const std::filesystem::path& systemDirectory);
+        void useMod(const std::filesystem::path& directory);
+        std::filesystem::path modDirectory();
+        std::filesystem::path resolveCase(const std::filesystem::path& path);
+        std::filesystem::path findFile(std::string relativeToSystem);
+        void initialize(const std::filesystem::path& systemDirectory, const std::filesystem::path& systemIni = {}, const std::filesystem::path& userIni = {});
         Ini& system();
         Ini& user();
         Ini* forName(Name configName);

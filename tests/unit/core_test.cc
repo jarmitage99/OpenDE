@@ -510,3 +510,212 @@ TEST_CASE("findGameRoot looks for game-data next to the AppImage")
     std::filesystem::remove_all(base);
     CHECK(root == base / "game-data");
 }
+
+TEST_CASE("an explicit system and user ini replace DeusEx.ini and User.ini and save under their own names", "[data]")
+{
+    initEngine();
+    dx::Ini system = dx::config::system();
+    dx::Ini user = dx::config::user();
+    std::filesystem::path base = std::filesystem::temp_directory_path() / "deusex-mod-ini-test";
+    std::filesystem::create_directories(base);
+    std::ofstream(base / "Mod.ini") << "[URL]\r\nMap=ModIndex.dx\r\n";
+    std::ofstream(base / "ModUser.ini") << "[Engine.Input]\r\nF1=ModHelp\r\n";
+    dx::config::system() = dx::Ini();
+    dx::config::user() = dx::Ini();
+    dx::config::initialize(std::filesystem::path(DEUSEX_GAME_DATA) / "System", base / "Mod.ini", base / "ModUser.ini");
+    std::optional<std::string> map = dx::config::system().get("URL", "Map");
+    std::optional<std::string> key = dx::config::user().get("Engine.Input", "F1");
+    std::filesystem::path systemPath = dx::config::system().path;
+    std::filesystem::path userPath = dx::config::user().path;
+    dx::config::system() = system;
+    dx::config::user() = user;
+    std::filesystem::remove_all(base);
+    CHECK(map == "ModIndex.dx");
+    CHECK(key == "ModHelp");
+    CHECK(systemPath == dx::config::userDirectory() / "Mod.ini");
+    CHECK(userPath == dx::config::userDirectory() / "ModUser.ini");
+}
+
+TEST_CASE("packages are found in the order of the Core.System Paths entries", "[data]")
+{
+    const char* xdg = std::getenv("XDG_DATA_HOME");
+    REQUIRE(xdg != nullptr);
+    std::filesystem::path home = std::filesystem::path(xdg) / "ini-paths";
+    std::filesystem::remove_all(home);
+    std::filesystem::path mod = home / "Mod" / "Textures";
+    std::filesystem::create_directories(mod);
+    std::filesystem::create_directories(home / "deusex");
+    std::filesystem::copy_file(std::filesystem::path(DEUSEX_GAME_DATA) / "Textures" / "CoreTexCeramic.utx", mod / "CoreTexBrick.utx");
+    std::ofstream(home / "deusex" / "DeusEx.ini") << "[Core.System]\r\nPaths=" << (mod / "*.utx").string() << "\r\nPaths=..\\System\\*.u\r\nPaths=..\\Textures\\*.utx\r\n";
+    std::filesystem::path out = home / "out";
+    std::string command = "XDG_DATA_HOME=\"" + home.string() + "\" \"" UCC_PATH "\" batchexport CoreTexBrick Texture bmp \"" + out.string() + "\" > /dev/null 2>&1";
+    REQUIRE(std::system(command.c_str()) == 0);
+    CHECK(std::filesystem::exists(out / "CermBeigFloor_A.bmp"));
+    CHECK_FALSE(std::filesystem::exists(out / "rough_greywall.bmp"));
+    std::filesystem::remove_all(home);
+}
+
+TEST_CASE("a mod finds its own inis, localization and user directory", "[data]")
+{
+    initEngine();
+    dx::Ini system = dx::config::system();
+    dx::Ini user = dx::config::user();
+    std::filesystem::path base = std::filesystem::temp_directory_path() / "deusex-mod-test";
+    std::filesystem::remove_all(base);
+    std::filesystem::path mod = base / "mods" / "TestMod";
+    std::filesystem::create_directories(mod / "Extras");
+    std::filesystem::create_directories(mod / "TestModData" / "System");
+    std::filesystem::create_directories(mod / "System");
+    std::ofstream(mod / "Extras" / "Readme.ini") << "[URL]\r\nMap=Wrong.dx\r\n";
+    std::ofstream(mod / "TestModData" / "System" / "testmod.ini") << "[URL]\r\nMap=ModIndex.dx\r\n[Core.System]\r\nPaths=..\\TestModData\\Maps\\*.dx\r\n";
+    std::ofstream(mod / "TestModData" / "System" / "TESTMODuser.ini") << "[Engine.Input]\r\nF1=ModHelp\r\n";
+    std::ofstream(mod / "System" / "ModOverlayText.int") << "[Labels]\r\nTitle=From the mod\r\n";
+    std::filesystem::path vanillaUser = dx::config::userDirectory();
+    dx::config::useMod(mod);
+    dx::config::system() = dx::Ini();
+    dx::config::user() = dx::Ini();
+    dx::config::initialize(std::filesystem::path(DEUSEX_GAME_DATA) / "System");
+    std::optional<std::string> map = dx::config::system().get("URL", "Map");
+    std::optional<std::string> key = dx::config::user().get("Engine.Input", "F1");
+    std::filesystem::path systemPath = dx::config::system().path;
+    std::filesystem::path userPath = dx::config::user().path;
+    std::filesystem::path modUser = dx::config::userDirectory();
+    std::string title = dx::config::localize("Labels", "Title", "ModOverlayText");
+    dx::config::useMod({});
+    dx::config::system() = system;
+    dx::config::user() = user;
+    std::filesystem::remove_all(base);
+    CHECK(map == "ModIndex.dx");
+    CHECK(key == "ModHelp");
+    CHECK(modUser == vanillaUser / "mods" / "TestMod");
+    CHECK(systemPath == modUser / "testmod.ini");
+    CHECK(userPath == modUser / "TESTMODuser.ini");
+    CHECK(title == "From the mod");
+}
+
+TEST_CASE("a mod's packages win over the game's for the same Paths entry", "[data]")
+{
+    initEngine();
+    dx::Ini system = dx::config::system();
+    std::filesystem::path base = std::filesystem::temp_directory_path() / "deusex-mod-overlay-test";
+    std::filesystem::remove_all(base);
+    std::filesystem::path game = base / "game";
+    std::filesystem::path mod = base / "mods" / "Overlay";
+    std::filesystem::create_directories(game / "Textures");
+    std::filesystem::create_directories(mod / "Textures");
+    std::filesystem::copy_file(std::filesystem::path(DEUSEX_GAME_DATA) / "Textures" / "CoreTexBrick.utx", game / "Textures" / "ModOverlayTex.utx");
+    std::filesystem::copy_file(std::filesystem::path(DEUSEX_GAME_DATA) / "Textures" / "CoreTexCeramic.utx", mod / "Textures" / "ModOverlayTex.utx");
+    dx::config::system() = dx::Ini();
+    dx::config::system().set("Core.System", "Paths", "..\\Textures\\*.utx");
+    dx::config::useMod(mod);
+    std::filesystem::path root = dx::objects::gameRoot();
+    dx::objects::initialize(game);
+    dx::objects::initialize(root);
+    dx::config::useMod({});
+    dx::config::system() = system;
+    dx::Linker* linker = dx::objects::loadPackage(dx::Name("ModOverlayTex"));
+    REQUIRE(linker != nullptr);
+    bool ceramic = linker->file().findExport("Texture", "CermBeigFloor_A") != 0;
+    bool brick = linker->file().findExport("Texture", "rough_greywall") != 0;
+    std::filesystem::remove_all(base);
+    CHECK(ceramic);
+    CHECK_FALSE(brick);
+}
+
+TEST_CASE("Paths entries match directories regardless of case and their maps are listed", "[data]")
+{
+    initEngine();
+    dx::Ini system = dx::config::system();
+    std::filesystem::path base = std::filesystem::temp_directory_path() / "deusex-paths-case-test";
+    std::filesystem::remove_all(base);
+    std::filesystem::create_directories(base / "game" / "Mod Data" / "Maps");
+    std::ofstream(base / "game" / "Mod Data" / "Maps" / "ModListedMap.dx").close();
+    dx::config::system() = dx::Ini();
+    dx::config::system().set("Core.System", "Paths", "..\\MOD DATA\\maps\\*.dx");
+    std::filesystem::path root = dx::objects::gameRoot();
+    dx::objects::initialize(base / "game");
+    dx::objects::initialize(root);
+    dx::config::system() = system;
+    bool registered = false;
+    for (const std::filesystem::path& path : dx::objects::packageFiles(".dx")) {
+        if (path.filename() == "ModListedMap.dx") {
+            registered = true;
+        }
+    }
+    dx::UClass* directoryClass = dx::objects::findClass("DeusEx.GameDirectory");
+    dx::UClass* actorClass = dx::objects::findClass("Engine.Actor");
+    dx::objects::flushLoads();
+    REQUIRE(directoryClass != nullptr);
+    REQUIRE(actorClass != nullptr);
+    dx::UObject* directory = dx::objects::newObject(directoryClass, dx::objects::packageObject(dx::Name("Transient")), dx::Name(), 0);
+    {
+        dx::vm::Call call(directory, dx::Name("SetDirType"));
+        call.byte(0);
+        call.run();
+    }
+    {
+        dx::vm::Call call(directory, dx::Name("SetDirFilter"));
+        call.s("ModListed");
+        call.run();
+    }
+    dx::vm::Call(directory, dx::Name("GetGameDirectory")).run();
+    dx::vm::Call count(directory, dx::Name("GetDirCount"));
+    count.run();
+    int32_t listed = *reinterpret_cast<int32_t*>(count.returnValue());
+    dx::vm::Call filename(directory, dx::Name("GetDirFilename"));
+    filename.i(0);
+    filename.run();
+    std::string first = *reinterpret_cast<std::string*>(filename.returnValue());
+    dx::vm::Call mapName(actorClass->defaultObject, dx::Name("GetMapName"));
+    mapName.s("ModListed").s("").i(0);
+    mapName.run();
+    std::string chosen = *reinterpret_cast<std::string*>(mapName.returnValue());
+    dx::objects::setPackageFile(dx::Name("ModListedMap"), {});
+    std::filesystem::remove_all(base);
+    CHECK(registered);
+    CHECK(listed == 1);
+    CHECK(first == "ModListedMap.dx");
+    CHECK(chosen == "ModListedMap.dx");
+}
+
+TEST_CASE("a mod with Default and DefUser inis, its own language and files outside Paths", "[data]")
+{
+    initEngine();
+    dx::Ini system = dx::config::system();
+    dx::Ini user = dx::config::user();
+    std::filesystem::path base = std::filesystem::temp_directory_path() / "deusex-mod-default-test";
+    std::filesystem::remove_all(base);
+    std::filesystem::path mod = base / "mods" / "Lang";
+    std::filesystem::create_directories(mod / "System");
+    std::filesystem::create_directories(mod / "Music" / "Ogg");
+    std::ofstream(mod / "System" / "LangDefault.ini") << "[URL]\r\nMap=LangIndex.dx\r\n[Engine.Engine]\r\nLanguage=opt\r\n[Core.System]\r\nPaths=..\\Maps\\*.dx\r\n";
+    std::ofstream(mod / "System" / "LangDefUser.ini") << "[Engine.Input]\r\nF1=LangHelp\r\n";
+    std::ofstream(mod / "System" / "LangText.opt") << "[Labels]\r\nTitle=Translated\r\n";
+    std::ofstream(mod / "System" / "LangText.int") << "[Labels]\r\nTitle=Original\r\nSubtitle=Only in int\r\n";
+    std::ofstream(mod / "Music" / "Ogg" / "Track.OGG").close();
+    dx::config::useMod(mod);
+    dx::config::system() = dx::Ini();
+    dx::config::user() = dx::Ini();
+    dx::config::initialize(std::filesystem::path(DEUSEX_GAME_DATA) / "System");
+    std::optional<std::string> map = dx::config::system().get("URL", "Map");
+    std::optional<std::string> key = dx::config::user().get("Engine.Input", "F1");
+    std::filesystem::path systemPath = dx::config::system().path;
+    std::filesystem::path userPath = dx::config::user().path;
+    std::filesystem::path modUser = dx::config::userDirectory();
+    std::string title = dx::config::localize("Labels", "Title", "LangText");
+    std::string subtitle = dx::config::localize("Labels", "Subtitle", "LangText");
+    std::filesystem::path track = dx::config::findFile("..\\music\\ogg\\track.ogg");
+    std::filesystem::path stock = dx::config::findFile("..\\System\\Engine.u");
+    dx::config::useMod({});
+    dx::config::system() = system;
+    dx::config::user() = user;
+    std::filesystem::remove_all(base);
+    CHECK(map == "LangIndex.dx");
+    CHECK(key == "LangHelp");
+    CHECK(systemPath == modUser / "Lang.ini");
+    CHECK(userPath == modUser / "LangUser.ini");
+    CHECK(title == "Translated");
+    CHECK(subtitle == "Only in int");
+    CHECK(track == mod / "Music" / "Ogg" / "Track.OGG");
+    CHECK(stock == std::filesystem::path(DEUSEX_GAME_DATA) / "System" / "Engine.u");
+}

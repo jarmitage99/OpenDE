@@ -353,14 +353,10 @@ namespace dx {
                 }
                 return;
             }
-            std::filesystem::path maps = objects::gameRoot() / "Maps";
-            if (!std::filesystem::is_directory(maps)) {
-                return;
-            }
             std::string filter = listing.filter;
             filter.erase(std::remove(filter.begin(), filter.end(), '*'), filter.end());
-            for (const auto& entry : std::filesystem::directory_iterator(maps)) {
-                std::string name = entry.path().filename().string();
+            for (const std::filesystem::path& path : objects::packageFiles(".dx")) {
+                std::string name = path.filename().string();
                 if (filter.empty() || name.find(filter) != std::string::npos) {
                     listing.entries.push_back(name);
                 }

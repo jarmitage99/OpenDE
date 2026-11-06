@@ -11,6 +11,10 @@
 
 #include <catch_amalgamated.hpp>
 
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -152,6 +156,82 @@ namespace {
     {
         call.run();
         return *reinterpret_cast<uint32_t*>(call.returnValue()) != 0;
+    }
+
+    void loadModHooks()
+    {
+        static bool built = false;
+        initializeEngine();
+        if (built) {
+            return;
+        }
+        const char* xdg = std::getenv("XDG_DATA_HOME");
+        REQUIRE(xdg != nullptr);
+        std::filesystem::path home = std::filesystem::path(xdg) / "mod-hooks";
+        std::filesystem::remove_all(home);
+        std::filesystem::path user = home / "deusex";
+        std::filesystem::create_directories(user / "ModHooks" / "Classes");
+        {
+            std::ifstream in(std::filesystem::path(DEUSEX_GAME_DATA) / "System" / "DeusEx.ini", std::ios::binary);
+            std::stringstream ini;
+            ini << in.rdbuf();
+            std::string content = ini.str();
+            size_t last = content.rfind("EditPackages=");
+            REQUIRE(last != std::string::npos);
+            content.insert(content.find('\n', last) + 1, "EditPackages=ModHooks\r\n");
+            std::ofstream out(user / "DeusEx.ini", std::ios::binary);
+            out << content;
+        }
+        {
+            std::ofstream out(user / "ModHooks" / "Classes" / "HookRoot.uc", std::ios::binary);
+            out << "class HookRoot extends RootWindow;\r\n\r\n"
+                   "var Window LastParent;\r\n"
+                   "var Window LastModified;\r\n"
+                   "var bool bModifiedBeforeInit;\r\n\r\n"
+                   "event MutateNewChild(Window NewParent, out class<Window> DesignatedClass)\r\n"
+                   "{\r\n"
+                   "\tif (DesignatedClass == Class'TileWindow')\r\n"
+                   "\t\tDesignatedClass = Class'TextWindow';\r\n"
+                   "}\r\n\r\n"
+                   "event ModifyNewChild(Window NewParent, Window NewKidOnTheBlock)\r\n"
+                   "{\r\n"
+                   "\tLastParent = NewParent;\r\n"
+                   "\tLastModified = NewKidOnTheBlock;\r\n"
+                   "\tbModifiedBeforeInit = !NewKidOnTheBlock.bIsInitialized;\r\n"
+                   "}\r\n";
+        }
+        {
+            std::ofstream out(user / "ModHooks" / "Classes" / "HookSettings.uc", std::ios::binary);
+            out << "class HookSettings extends MenuSettings;\r\n\r\n"
+                   "var localized string NewButtonNames[10];\r\n\r\n"
+                   "defaultproperties\r\n"
+                   "{\r\n"
+                   "     NewButtonNames(0)=\"Keyboard/Mouse\"\r\n"
+                   "     NewButtonNames(1)=\"Controls\"\r\n"
+                   "     NewButtonNames(2)=\"Game Options\"\r\n"
+                   "     NewButtonNames(3)=\"Mod Options\"\r\n"
+                   "     NewButtonNames(4)=\"Display\"\r\n"
+                   "     NewButtonNames(5)=\"Colors\"\r\n"
+                   "     NewButtonNames(6)=\"Sound\"\r\n"
+                   "     NewButtonNames(7)=\"Previous Menu\"\r\n"
+                   "     buttonDefaults(3)=(Y=121,Action=MA_MenuScreen,Invoke=Class'DeusEx.MenuScreenOptions')\r\n"
+                   "     buttonDefaults(4)=(Y=157,Action=MA_MenuScreen,Invoke=Class'DeusEx.MenuScreenDisplay')\r\n"
+                   "     buttonDefaults(5)=(Y=193,Action=MA_MenuScreen,Invoke=Class'DeusEx.MenuScreenAdjustColors')\r\n"
+                   "     buttonDefaults(6)=(Y=229,Action=MA_MenuScreen,Invoke=Class'DeusEx.MenuScreenSound')\r\n"
+                   "     buttonDefaults(7)=(Y=302,Action=MA_Previous)\r\n"
+                   "     ClientHeight=335\r\n"
+                   "}\r\n";
+        }
+        REQUIRE(std::system(("XDG_DATA_HOME=\"" + home.string() + "\" \"" UCC_PATH "\" make > \"" + (home / "make.log").string() + "\" 2>&1").c_str()) == 0);
+        std::filesystem::path package = user / "System" / "ModHooks.u";
+        REQUIRE(std::filesystem::exists(package));
+        dx::Linker* linker = dx::objects::loadPackageFile(dx::Name("ModHooks"), package, false);
+        REQUIRE(linker != nullptr);
+        for (size_t i = 0; i < linker->file().exports().size(); i++) {
+            dx::objects::ensureLoaded(linker->object(static_cast<int32_t>(i + 1)));
+        }
+        dx::objects::flushLoads();
+        built = true;
     }
 }
 
@@ -1544,4 +1624,49 @@ TEST_CASE("Scope view borders drawn by script cover an ultrawide screen around a
         dx::extension::setViewportSize(800, 600);
     }
     dx::objects::unloadPackage(dx::Name("01_NYC_UNATCOIsland"));
+}
+
+TEST_CASE("NewChild lets the root window swap the class and edit the child before InitWindow", "[data]")
+{
+    loadModHooks();
+    dx::UObject* root = makeRoot("ModHooks.HookRoot");
+    REQUIRE(root->cls->name == dx::Name("HookRoot"));
+    dx::UObject* swapped = newChild(root, "Extension.TileWindow");
+    REQUIRE(swapped != nullptr);
+    CHECK(swapped->cls->name == dx::Name("TextWindow"));
+    CHECK(*reinterpret_cast<dx::UObject**>(root->propertyAddress(dx::Name("LastParent"))) == root);
+    CHECK(*reinterpret_cast<dx::UObject**>(root->propertyAddress(dx::Name("LastModified"))) == swapped);
+    CHECK(*reinterpret_cast<uint32_t*>(root->propertyAddress(dx::Name("bModifiedBeforeInit"))) != 0);
+    dx::UObject* kept = newChild(swapped, "Extension.Window");
+    REQUIRE(kept != nullptr);
+    CHECK(kept->cls->name == dx::Name("Window"));
+    CHECK(*reinterpret_cast<dx::UObject**>(root->propertyAddress(dx::Name("LastParent"))) == swapped);
+    CHECK(*reinterpret_cast<dx::UObject**>(root->propertyAddress(dx::Name("LastModified"))) == kept);
+}
+
+TEST_CASE("An inserted menu button is labelled in NewButtonNames when the menu declares it", "[data]")
+{
+    loadModHooks();
+    dx::UObject* menu = dx::objects::findClass("ModHooks.HookSettings")->defaultObject;
+    dx::UClass* invoke = dx::objects::findClass("DeusEx.MenuScreenControls");
+    dx::UStruct* button = menu->cls->findProperty(dx::Name("buttonDefaults"))->structType;
+    size_t invokeOffset = button->findProperty(dx::Name("Invoke"))->offset;
+    size_t yOffset = button->findProperty(dx::Name("Y"))->offset;
+    auto label = [menu](int index) {
+        return *reinterpret_cast<std::string*>(menu->propertyAddress(dx::Name("NewButtonNames"), index));
+    };
+    auto invoked = [menu, invokeOffset](int index) {
+        dx::UObject* cls = *reinterpret_cast<dx::UObject**>(menu->propertyAddress(dx::Name("buttonDefaults"), index) + invokeOffset);
+        return cls ? cls->name.str() : std::string();
+    };
+    dx::deusex::insertMenuButton(menu, 3, "Extra Gameplay", invoke);
+    const char* labels[] = { "Keyboard/Mouse", "Controls", "Game Options", "Extra Gameplay", "Mod Options", "Display", "Colors", "Sound", "Previous Menu", "" };
+    const char* screens[] = { "MenuScreenCustomizeKeys", "MenuScreenControls", "MenuScreenOptions", "MenuScreenControls", "MenuScreenOptions", "MenuScreenDisplay", "MenuScreenAdjustColors", "MenuScreenSound", "", "" };
+    for (int i = 0; i < 10; i++) {
+        INFO(i);
+        CHECK(label(i) == labels[i]);
+        CHECK(invoked(i) == screens[i]);
+    }
+    CHECK(*reinterpret_cast<int32_t*>(menu->propertyAddress(dx::Name("buttonDefaults"), 8) + yOffset) == 338);
+    CHECK(*reinterpret_cast<std::string*>(menu->propertyAddress(dx::Name("ButtonNames"), 3)) == "Display");
 }

@@ -127,6 +127,28 @@ namespace dx::audio {
             }
         }
 
+        struct OggMusic {
+            ma_decoder intro {};
+            ma_decoder loop {};
+            bool hasIntro = false;
+            bool hasLoop = false;
+            bool inIntro = false;
+
+            OggMusic() = default;
+            OggMusic(const OggMusic&) = delete;
+            OggMusic& operator=(const OggMusic&) = delete;
+
+            ~OggMusic()
+            {
+                if (hasIntro) {
+                    ma_decoder_uninit(&intro);
+                }
+                if (hasLoop) {
+                    ma_decoder_uninit(&loop);
+                }
+            }
+        };
+
         struct State {
             bool active = false;
             bool offline = false;
@@ -166,6 +188,13 @@ namespace dx::audio {
             ReverbSettings reverbSettings;
             std::unordered_map<const USound*, std::shared_ptr<const DecodedSound>> sounds;
             std::unordered_map<const UMusic*, std::shared_ptr<const ItModule>> modules;
+            std::unique_ptr<OggMusic> ogg;
+            std::unique_ptr<OggMusic> pendingOgg;
+            UObject* oggOwner = nullptr;
+            float oggFade = 1;
+            float oggFadeSpeed = 0;
+            bool oggRequested = false;
+            SoundModifier modifier;
         };
 
         State& state()
@@ -470,6 +499,95 @@ namespace dx::audio {
             }
         }
 
+        float transitionSpeed(uint8_t transition)
+        {
+            return transition == TransitionFade ? 1.0f : (transition == TransitionFastFade ? 3.0f : (transition == TransitionSlowFade ? 0.2f : 0.0f));
+        }
+
+        bool openOggFile(const std::filesystem::path& path, uint32_t rate, ma_decoder& decoder)
+        {
+            if (path.empty()) {
+                return false;
+            }
+            ma_decoder_config config = ma_decoder_config_init(ma_format_f32, 2, rate);
+            return ma_decoder_init_file(path.string().c_str(), &config, &decoder) == MA_SUCCESS;
+        }
+
+        std::unique_ptr<OggMusic> openOgg(const std::filesystem::path& intro, const std::filesystem::path& loop, float position, uint32_t rate)
+        {
+            auto music = std::make_unique<OggMusic>();
+            music->hasLoop = openOggFile(loop, rate, music->loop);
+            music->hasIntro = position <= 0 && openOggFile(intro, rate, music->intro);
+            music->inIntro = music->hasIntro;
+            if (!music->hasIntro && !music->hasLoop) {
+                return nullptr;
+            }
+            if (music->hasLoop && position > 0) {
+                ma_decoder_seek_to_pcm_frame(&music->loop, static_cast<ma_uint64>(static_cast<double>(position) * rate));
+            }
+            return music;
+        }
+
+        void renderOgg(OggMusic& music, float* out, size_t frames)
+        {
+            size_t done = 0;
+            int empty = 0;
+            while (done < frames && empty < 2) {
+                ma_decoder& decoder = music.inIntro ? music.intro : music.loop;
+                ma_uint64 read = 0;
+                ma_decoder_read_pcm_frames(&decoder, out + done * 2, frames - done, &read);
+                done += static_cast<size_t>(read);
+                if (done == frames) {
+                    break;
+                }
+                empty = read == 0 ? empty + 1 : 0;
+                if (music.inIntro) {
+                    music.inIntro = false;
+                    empty = 0;
+                    if (!music.hasLoop) {
+                        break;
+                    }
+                } else if (!music.hasLoop || ma_decoder_seek_to_pcm_frame(&music.loop, 0) != MA_SUCCESS) {
+                    break;
+                }
+            }
+            std::fill(out + done * 2, out + frames * 2, 0.0f);
+        }
+
+        void stopOgg(State& s)
+        {
+            s.ogg.reset();
+            s.pendingOgg.reset();
+            s.oggOwner = nullptr;
+            s.oggFade = 1;
+            s.oggRequested = false;
+        }
+
+        void mixOgg(State& s, float* out, size_t frames)
+        {
+            if (!s.ogg) {
+                return;
+            }
+            if (s.scratch.size() < frames * 2) {
+                s.scratch.resize(frames * 2);
+            }
+            renderOgg(*s.ogg, s.scratch.data(), frames);
+            for (size_t i = 0; i < frames; i++) {
+                if (s.oggRequested) {
+                    s.oggFade -= s.oggFadeSpeed / static_cast<float>(s.rate);
+                }
+                int32_t master = static_cast<int32_t>(static_cast<Ext>(std::max(s.oggFade, 0.0f)) * static_cast<Ext>(s.musicVolume) * 127.0L);
+                float gain = static_cast<float>(master * master) / 16129.0f;
+                out[i * 2] += s.scratch[i * 2] * gain;
+                out[i * 2 + 1] += s.scratch[i * 2 + 1] * gain;
+            }
+            if (s.oggRequested && s.oggFade <= 0) {
+                s.ogg = std::move(s.pendingOgg);
+                s.oggFade = 1;
+                s.oggRequested = false;
+            }
+        }
+
         void mixAll(State& s, float* out, size_t frames)
         {
             std::fill(out, out + frames * 2, 0.0f);
@@ -488,6 +606,7 @@ namespace dx::audio {
             }),
                 s.voices.end());
             mixMusic(s, out, frames);
+            mixOgg(s, out, frames);
             for (size_t i = 0; i < frames * 2; i++) {
                 out[i] = std::clamp(out[i], -1.0f, 1.0f);
             }
@@ -1038,6 +1157,8 @@ namespace dx::audio {
         s.reverbSettings = {};
         s.music.reset();
         s.pendingMusic.reset();
+        stopOgg(s);
+        s.modifier = {};
         s.musicObject = nullptr;
         s.musicSection = -1;
         s.musicPlaying = false;
@@ -1091,6 +1212,10 @@ namespace dx::audio {
                 zone = region(view).zone;
             }
             present.insert(world->actors.begin(), world->actors.end());
+            if (s.oggOwner && !present.count(s.oggOwner)) {
+                std::lock_guard<std::mutex> lock(s.mutex);
+                stopOgg(s);
+            }
             bool realtime = !world->levelInfo || !world->levelInfo->data || levelinfo::Pauser(world->levelInfo).empty();
             updateAmbient(s, world, realtime);
         } else {
@@ -1147,6 +1272,11 @@ namespace dx::audio {
         if (!pcm) {
             return 0;
         }
+        if (s.modifier.enabled) {
+            volume *= s.modifier.volume;
+            radius *= s.modifier.radius;
+            pitch *= s.modifier.pitch;
+        }
         return addVoice(s, makeVoice(s, pcm, sound, actor, slot, location, volume, radius, pitch, attenuate), noOverride);
     }
 
@@ -1157,6 +1287,9 @@ namespace dx::audio {
             return;
         }
         std::lock_guard<std::mutex> lock(s.mutex);
+        if (s.oggOwner == actor) {
+            stopOgg(s);
+        }
         for (Voice& voice : s.voices) {
             if (voice.actor != actor) {
                 continue;
@@ -1206,7 +1339,7 @@ namespace dx::audio {
                 player = std::make_unique<ModulePlayer>(module, s.rate);
             }
         }
-        float speed = transition == TransitionFade ? 1.0f : (transition == TransitionFastFade ? 3.0f : (transition == TransitionSlowFade ? 0.2f : 0.0f));
+        float speed = transitionSpeed(transition);
         std::lock_guard<std::mutex> lock(s.mutex);
         s.requestObject = music;
         s.requestSection = section;
@@ -1217,6 +1350,52 @@ namespace dx::audio {
             return;
         }
         s.fadeSpeed = speed;
+    }
+
+    void playOgg(UObject* owner, const std::filesystem::path& intro, const std::filesystem::path& loop, float position, uint8_t transition)
+    {
+        State& s = state();
+        if (!s.active) {
+            return;
+        }
+        std::unique_ptr<OggMusic> music = openOgg(intro, loop, position, s.rate);
+        float speed = transitionSpeed(transition);
+        std::unique_ptr<OggMusic> previous;
+        std::lock_guard<std::mutex> lock(s.mutex);
+        s.oggOwner = owner;
+        if (speed == 0 || !s.ogg) {
+            previous = std::move(s.ogg);
+            s.ogg = std::move(music);
+            s.pendingOgg.reset();
+            s.oggFade = 1;
+            s.oggRequested = false;
+            return;
+        }
+        s.pendingOgg = std::move(music);
+        s.oggFadeSpeed = speed;
+        s.oggRequested = true;
+    }
+
+    float oggPosition()
+    {
+        State& s = state();
+        std::lock_guard<std::mutex> lock(s.mutex);
+        if (!s.ogg || s.ogg->inIntro || !s.ogg->hasLoop) {
+            return 0;
+        }
+        ma_uint64 cursor = 0;
+        ma_decoder_get_cursor_in_pcm_frames(&s.ogg->loop, &cursor);
+        return static_cast<float>(static_cast<double>(cursor) / s.rate);
+    }
+
+    void setSoundModifier(const SoundModifier& modifier)
+    {
+        state().modifier = modifier;
+    }
+
+    SoundModifier soundModifier()
+    {
+        return state().modifier;
     }
 
     void setVolumes(float sound, float music, float speech)

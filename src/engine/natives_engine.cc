@@ -776,13 +776,10 @@ namespace dx {
             int32_t direction = vm::get<int32_t>(stack);
             vm::finish(stack);
             std::vector<std::string> maps;
-            std::filesystem::path directory = objects::gameRoot() / "Maps";
-            if (std::filesystem::is_directory(directory)) {
-                for (const auto& item : std::filesystem::directory_iterator(directory)) {
-                    std::string file = item.path().filename().string();
-                    if (prefix.empty() || iequals(file.substr(0, prefix.size()), prefix)) {
-                        maps.push_back(file);
-                    }
+            for (const std::filesystem::path& path : objects::packageFiles(".dx")) {
+                std::string file = path.filename().string();
+                if (prefix.empty() || iequals(file.substr(0, prefix.size()), prefix)) {
+                    maps.push_back(file);
                 }
             }
             std::sort(maps.begin(), maps.end());

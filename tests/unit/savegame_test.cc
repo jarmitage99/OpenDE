@@ -1,3 +1,4 @@
+#include "core/config.h"
 #include "core/objects.h"
 #include "core/package_writer.h"
 #include "core/vm.h"
@@ -369,4 +370,18 @@ TEST_CASE("plane struct values are written and read with their own member W befo
     }
     dx::objects::unloadPackage(dx::Name("PlaneOrderPackage"));
     std::filesystem::remove(file);
+}
+
+TEST_CASE("the save directory follows the SavePath of the system ini under the user directory", "[data]")
+{
+    dx::engine::initialize(DEUSEX_GAME_DATA);
+    std::optional<std::string> previous = dx::config::system().get("Core.System", "SavePath");
+    REQUIRE(previous.has_value());
+    dx::config::system().set("Core.System", "SavePath", "..\\ModSaves\\Save");
+    dx::savegame::setSaveRoot({});
+    std::filesystem::path root = dx::savegame::saveRoot();
+    dx::config::system().set("Core.System", "SavePath", *previous);
+    dx::savegame::setSaveRoot({});
+    std::filesystem::remove_all(dx::config::userDirectory() / "ModSaves");
+    CHECK(root == dx::config::userDirectory() / "ModSaves" / "Save");
 }

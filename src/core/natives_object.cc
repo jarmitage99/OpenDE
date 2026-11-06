@@ -1144,7 +1144,7 @@ namespace dx {
                     const std::vector<UObject*>& all = objects::all();
                     while (index < all.size()) {
                         UObject* candidate = all[index++];
-                        if (candidate && !candidate->destroyed && candidate->loaded && (!baseClass || candidate->isA(baseClass))) {
+                        if (candidate && !candidate->destroyed && candidate->loaded && (!baseClass || candidate->isA(baseClass)) && !(candidate->cls && candidate == candidate->cls->defaultObject)) {
                             *out = candidate;
                             return true;
                         }

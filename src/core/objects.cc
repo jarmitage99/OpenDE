@@ -433,15 +433,31 @@ namespace dx {
             }
             const char* folders[] = { "System", "Textures", "Sounds", "Music", "Maps" };
             const char* extensions[] = { ".u", ".utx", ".uax", ".umx", ".dx", ".unr" };
-            std::vector<std::filesystem::path> directories;
-            for (const char* folder : folders) {
-                directories.push_back(gameRoot / folder);
+            std::vector<std::filesystem::path> roots;
+            if (!config::modDirectory().empty()) {
+                roots.push_back(config::modDirectory());
+            }
+            roots.push_back(gameRoot);
+            std::vector<std::pair<std::filesystem::path, std::string>> directories;
+            for (std::string entry : config::system().getAll("Core.System", "Paths")) {
+                std::replace(entry.begin(), entry.end(), '\\', '/');
+                std::filesystem::path pattern(entry);
+                for (const std::filesystem::path& root : roots) {
+                    directories.emplace_back(config::resolveCase((root / "System" / pattern.parent_path()).lexically_normal()), lower(pattern.extension().string()));
+                }
+            }
+            if (directories.empty()) {
+                for (const char* folder : folders) {
+                    for (const std::filesystem::path& root : roots) {
+                        directories.emplace_back(root / folder, "");
+                    }
+                }
             }
             std::filesystem::path user = config::userDirectory();
             for (const char* folder : { "System", "Textures", "Sounds", "Music" }) {
-                directories.push_back(user / folder);
+                directories.emplace_back(user / folder, "");
             }
-            for (const std::filesystem::path& directory : directories) {
+            for (const auto& [directory, filter] : directories) {
                 if (!std::filesystem::is_directory(directory)) {
                     continue;
                 }
@@ -449,7 +465,7 @@ namespace dx {
                     std::string extension = lower(item.path().extension().string());
                     bool known = false;
                     for (const char* candidate : extensions) {
-                        if (extension == candidate) {
+                        if (extension == candidate && (filter.empty() || filter == extension)) {
                             known = true;
                         }
                     }
@@ -466,6 +482,17 @@ namespace dx {
         const std::filesystem::path& gameRoot()
         {
             return registry().root;
+        }
+
+        std::vector<std::filesystem::path> packageFiles(std::string_view extension)
+        {
+            std::vector<std::filesystem::path> files;
+            for (const auto& [name, path] : registry().paths) {
+                if (lower(path.extension().string()) == extension) {
+                    files.push_back(path);
+                }
+            }
+            return files;
         }
 
         UObject* packageObject(Name packageName)

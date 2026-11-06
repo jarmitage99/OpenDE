@@ -17,7 +17,7 @@
 #include <filesystem>
 
 namespace dx::engine {
-    void initializeCore(const std::string& gameRoot)
+    void initializeCore(const std::string& gameRoot, const std::filesystem::path& systemIni, const std::filesystem::path& userIni)
     {
         static bool initialized = false;
         if (initialized) {
@@ -25,24 +25,25 @@ namespace dx::engine {
         }
         initialized = true;
         std::filesystem::path root(gameRoot);
-        config::initialize(root / "System");
+        config::initialize(root / "System", systemIni, userIni);
         registerEngineResources();
         registerMeshResources();
         registerObjectNatives();
         registerEngineNatives();
         extension::registerNatives();
         registerDeusExNatives();
+        registerTnmNatives();
         objects::initialize(root);
     }
 
-    void initialize(const std::string& gameRoot)
+    void initialize(const std::string& gameRoot, const std::filesystem::path& systemIni, const std::filesystem::path& userIni)
     {
         static bool initialized = false;
         if (initialized) {
             return;
         }
         initialized = true;
-        initializeCore(gameRoot);
+        initializeCore(gameRoot, systemIni, userIni);
         const char* packages[] = { "Engine", "Fire", "Extension", "ConSys", "DeusExText", "DeusEx" };
         for (const char* package : packages) {
             objects::loadPackage(Name(package));

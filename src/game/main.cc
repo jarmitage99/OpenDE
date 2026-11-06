@@ -162,6 +162,9 @@ namespace {
     struct Options {
         std::string map;
         std::string screenshot;
+        std::string ini;
+        std::string userIni;
+        std::string mod;
         int frames = -1;
         int width = 1280;
         int height = 720;
@@ -185,6 +188,12 @@ namespace {
             } else if (arg == "--height" && i + 1 < argc) {
                 options.height = std::atoi(argv[++i]);
                 options.sizeGiven = true;
+            } else if (arg == "--ini" && i + 1 < argc) {
+                options.ini = argv[++i];
+            } else if (arg == "--userini" && i + 1 < argc) {
+                options.userIni = argv[++i];
+            } else if (arg == "--mod" && i + 1 < argc) {
+                options.mod = argv[++i];
             } else if (arg == "--exec" && i + 1 < argc) {
                 options.commands.push_back(argv[++i]);
             } else if (arg == "--at" && i + 1 < argc) {
@@ -300,9 +309,12 @@ namespace {
             return std::atan(std::tan(adjusted * dx::Pi / 360.0f) * aspect) * 360.0f / dx::Pi;
         }
 
-        void loadDeusExClasses()
+        void loadPackageClasses(const std::string& package)
         {
-            dx::Linker* linker = dx::objects::loadPackage(dx::Name("DeusEx"));
+            dx::Linker* linker = dx::objects::loadPackage(dx::Name(package));
+            if (!linker) {
+                return;
+            }
             const dx::Package& file = linker->file();
             for (size_t i = 0; i < file.exports().size(); i++) {
                 if (file.exports()[i].classRef == 0) {
@@ -388,9 +400,18 @@ namespace {
             dx::deusex::spliceMenuBackground(gameplayDefaults, 55, 343);
             *reinterpret_cast<int32_t*>(gameplayDefaults->propertyAddress(dx::Name("ClientHeight"))) -= 288;
             *reinterpret_cast<int32_t*>(gameplayDefaults->propertyAddress(dx::Name("helpPosY"))) -= 288;
-            dx::UObject* settings = dx::objects::findClass("DeusEx.MenuSettings")->defaultObject;
-            dx::deusex::insertMenuButton(settings, 3, "Extra Gameplay", gameplay);
-            dx::deusex::insertMenuButton(settings, 5, "Extra Graphics", screen);
+            dx::UClass* settingsClass = dx::objects::findClass("DeusEx.MenuSettings");
+            std::vector<dx::UClass*> menus;
+            for (dx::UObject* object : dx::objects::all()) {
+                dx::UClass* cls = dx::cast<dx::UClass>(object);
+                if (cls && cls->defaultObject && cls->isChildOf(settingsClass)) {
+                    menus.push_back(cls);
+                }
+            }
+            for (dx::UClass* menu : menus) {
+                dx::deusex::insertMenuButton(menu->defaultObject, 3, "Extra Gameplay", gameplay);
+                dx::deusex::insertMenuButton(menu->defaultObject, 5, "Extra Graphics", screen);
+            }
         }
 
         void addPlayerSpeedChoice(dx::UClass* screen, int index)
@@ -504,7 +525,16 @@ namespace {
 
         bool start()
         {
-            dx::engine::initialize(dx::config::findGameRoot(DEUSEX_GAME_DATA).string());
+            std::filesystem::path root = dx::config::findGameRoot(DEUSEX_GAME_DATA);
+            if (!options.mod.empty()) {
+                std::filesystem::path mod = (root / "..").lexically_normal() / "mods" / options.mod;
+                if (!std::filesystem::is_directory(mod)) {
+                    std::fprintf(stderr, "mod %s not found in %s\n", options.mod.c_str(), mod.parent_path().string().c_str());
+                    return false;
+                }
+                dx::config::useMod(mod);
+            }
+            dx::engine::initialize(root.string(), options.ini, options.userIni);
             dx::audio::initialize();
             dx::audio::setLightRandom(dx::lightRandomBase);
             renderer = std::make_unique<dx::SceneRenderer>();
@@ -590,7 +620,9 @@ namespace {
                 int height = static_cast<int>(std::lround(request.height));
                 renderer->drawSceneRect(world->level, world->actors, request.location, request.rotation, request.fov, hidden, x, y, width, height);
             });
-            loadDeusExClasses();
+            loadPackageClasses("DeusEx");
+            std::string rootClass = dx::config::system().get("Engine.Engine", "Root").value_or("DeusEx.DeusExRootWindow");
+            loadPackageClasses(rootClass.substr(0, rootClass.find('.')));
             addFieldOfViewChoice();
             addExtraOptions();
             std::string map = options.map;

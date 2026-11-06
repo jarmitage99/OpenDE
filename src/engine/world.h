@@ -6,6 +6,7 @@
 #include "engine/decal.h"
 
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <string>
@@ -129,9 +130,10 @@ namespace dx {
     };
 
     namespace engine {
-        void initialize(const std::string& gameRoot);
-        void initializeCore(const std::string& gameRoot);
+        void initialize(const std::string& gameRoot, const std::filesystem::path& systemIni = {}, const std::filesystem::path& userIni = {});
+        void initializeCore(const std::string& gameRoot, const std::filesystem::path& systemIni = {}, const std::filesystem::path& userIni = {});
         void registerEngineNatives();
         void registerDeusExNatives();
+        void registerTnmNatives();
     }
 }

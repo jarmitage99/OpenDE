@@ -46,7 +46,9 @@ namespace dx {
 
             std::filesystem::path defaultRoot()
             {
-                return config::userDirectory() / "Save";
+                std::string savePath = config::system().get("Core.System", "SavePath").value_or("..\\Save");
+                std::replace(savePath.begin(), savePath.end(), '\\', '/');
+                return (config::userDirectory() / "System" / savePath).lexically_normal();
             }
 
             bool classNamed(const UClass* cls, std::initializer_list<const char*> names)

@@ -382,6 +382,24 @@ TEST_CASE("AllActors visits actors spawned inside the loop and CycleActors wraps
     CHECK(index == last);
 }
 
+TEST_CASE("AllObjects visits live objects but never class default objects", "[data]")
+{
+    IslandWorld island;
+    dx::UObject* player = island.world.player();
+    REQUIRE(player != nullptr);
+    dx::UObject* holder = spawnClass(island.world, "DeusEx.Switch1", dx::actor::Location(player) + dx::Vector { 0, 0, 2000 });
+    dx::UClass* playerPawnExt = dx::objects::findClass("Extension.PlayerPawnExt");
+    REQUIRE(playerPawnExt != nullptr);
+    Bytecode all;
+    all.native(1001).object(playerPawnExt).member(holder, "Target").end();
+    std::vector<dx::UObject*> found = runIterator(holder, all);
+    long defaults = std::count_if(found.begin(), found.end(), [](dx::UObject* object) {
+        return object == object->cls->defaultObject;
+    });
+    CHECK(contains(found, player));
+    CHECK(defaults == 0);
+}
+
 TEST_CASE("Trace defaults to tracing actors when the caller collides and a miss reports a zero hit location", "[data]")
 {
     IslandWorld island;

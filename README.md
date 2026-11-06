@@ -88,6 +88,45 @@ written there, and saved games are in `Save/`. The game data directory is
 never written to. Key bindings are the original ones from `User.ini`, for
 example keypad `+` for QuickSave and keypad `/` for QuickLoad.
 
+## Mods: GMDX
+
+Mods live in `mods/`, right next to `game-data`, one folder each. Your game
+data never gets touched.
+
+Download GMDX from ModDB, unpack it into its own mod folder:
+
+    $ mkdir -p mods/GMDX && cd mods/GMDX
+    $ 7z x -aou ../../GMDX_v9.0.3.exe
+
+The first copy of each file is the English one. Delete the rest if you
+dont want them:
+
+    $ rm System/DeusEx_*.int System/*.est GMDXv9/System/gmdx_*.ini GMDXv9/System/*.est GMDXv9/System/DeusEx.rut
+    $ rm -rf '$PLUGINSDIR' 'HDTP/$PLUGINSDIR' 'New Vision/Textures/$PLUGINSDIR'
+
+HDTP is required. For New Vision, `-aos` keeps the `KZTextures.utx`:
+
+    $ 7z x -oHDTP HDTP/HDTP.7z && rm HDTP/HDTP.7z
+    $ 7z x -aos "-oNew Vision/Textures" "New Vision/Textures/NVTextures.7z" && rm "New Vision/Textures/NVTextures.7z"
+
+You should now have `GMDXv9`, `HDTP`, `New Vision` and `System` inside
+`mods/GMDX`. Now just launch the game:
+
+    $ build/bin/deusex --mod GMDX
+
+Settings and saves are in `~/.local/share/deusex/mods/GMDX`.
+
+## Mods: The Nameless Mod
+
+Similar setup:
+
+    $ mkdir -p mods/TNM && cd mods/TNM
+    $ 7z x ../../The_Nameless_Mod_Installer_2023-9-17_1132.exe
+
+Check that `System` and `TNM2` exist in `mods/TNM`. Then:
+
+    $ build/bin/deusex --mod TNM
+
 ## Editor
 
     $ build/bin/deused 01_NYC_UNATCOIsland

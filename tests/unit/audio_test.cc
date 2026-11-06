@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -1159,4 +1160,84 @@ TEST_CASE("speech phonemes come from the strongest FFT bin of the window")
     CHECK(tone(20) == 'A');
     CHECK(tone(40) == 'F');
     CHECK(tone(60) == 'T');
+}
+
+namespace {
+    float peak(const std::vector<float>& buffer)
+    {
+        float result = 0;
+        for (float sample : buffer) {
+            result = std::max(result, std::abs(sample));
+        }
+        return result;
+    }
+}
+
+TEST_CASE("ogg music plays the intro once, then loops, and resumes the loop at a position")
+{
+    REQUIRE(dx::audio::initializeOffline(44100));
+    dx::audio::setVolumes(1.0f, 1.0f, 1.0f);
+    std::filesystem::path intro = std::filesystem::path(TEST_FIXTURES) / "intro.ogg";
+    std::filesystem::path loop = std::filesystem::path(TEST_FIXTURES) / "loop.ogg";
+    dx::audio::playOgg(nullptr, intro, loop, 0.0f, 1);
+    std::vector<float> buffer(11025 * 2);
+    dx::audio::render(buffer.data(), 11025);
+    float introPeak = peak(buffer);
+    float duringIntro = dx::audio::oggPosition();
+    std::vector<float> rest(22050 * 2);
+    dx::audio::render(rest.data(), 22050);
+    float intoLoop = dx::audio::oggPosition();
+    std::vector<float> wrap(44100 * 2);
+    dx::audio::render(wrap.data(), 44100);
+    float wrapped = dx::audio::oggPosition();
+    float wrapPeak = peak(wrap);
+    dx::audio::playOgg(nullptr, intro, loop, 0.6f, 1);
+    float resumed = dx::audio::oggPosition();
+    dx::audio::shutdown();
+    CHECK(introPeak > 0.08f);
+    CHECK(duringIntro == 0.0f);
+    CHECK(intoLoop == Catch::Approx(0.25).margin(0.01));
+    CHECK(wrapped == Catch::Approx(0.25).margin(0.01));
+    CHECK(wrapPeak > 0.08f);
+    CHECK(resumed == Catch::Approx(0.6).margin(0.01));
+}
+
+TEST_CASE("a fading ogg request fades the playing track out before switching")
+{
+    REQUIRE(dx::audio::initializeOffline(44100));
+    dx::audio::setVolumes(1.0f, 1.0f, 1.0f);
+    std::filesystem::path loop = std::filesystem::path(TEST_FIXTURES) / "loop.ogg";
+    dx::audio::playOgg(nullptr, {}, loop, 0.0f, 1);
+    dx::audio::playOgg(nullptr, {}, {}, 0.0f, 3);
+    std::vector<float> start(4410 * 2);
+    dx::audio::render(start.data(), 4410);
+    std::vector<float> middle(39690 * 2);
+    dx::audio::render(middle.data(), 39690);
+    std::vector<float> end(4410 * 2);
+    dx::audio::render(end.data(), 4410);
+    dx::audio::shutdown();
+    CHECK(peak(start) > 0.08f);
+    CHECK(peak(end) == 0.0f);
+}
+
+TEST_CASE("the sound modifier scales the pitch of sounds started while it is enabled", "[data]")
+{
+    dx::engine::initialize(DEUSEX_GAME_DATA);
+    REQUIRE(dx::audio::initializeOffline(44100));
+    dx::USound tone;
+    tone.bytes = constantWave(1000, 22050, 4000);
+    dx::audio::setSoundModifier({ true, 1.0f, 1.0f, 0.5f });
+    REQUIRE(dx::audio::playSound(&tone, nullptr, dx::audio::SlotNone, {}, 1.0f, 1000.0f, 1.0f, false) != 0);
+    double slowed = dx::audio::voices().front().step;
+    dx::audio::shutdown();
+    REQUIRE(dx::audio::initializeOffline(44100));
+    dx::audio::SoundModifier restarted = dx::audio::soundModifier();
+    dx::audio::setSoundModifier({ false, 1.0f, 1.0f, 0.5f });
+    REQUIRE(dx::audio::playSound(&tone, nullptr, dx::audio::SlotNone, {}, 1.0f, 1000.0f, 1.0f, false) != 0);
+    double normal = dx::audio::voices().front().step;
+    dx::audio::shutdown();
+    CHECK(slowed == 0.25);
+    CHECK(normal == 0.5);
+    CHECK_FALSE(restarted.enabled);
+    CHECK(restarted.pitch == 1.0f);
 }

@@ -82,16 +82,17 @@ namespace dx::deusex {
         UStruct* button = menu->cls->findProperty(Name("buttonDefaults"))->structType;
         size_t yOffset = button->findProperty(Name("Y"))->offset;
         size_t invokeOffset = button->findProperty(Name("Invoke"))->offset;
-        bool names = menu->cls->findProperty(Name("ButtonNames")) != nullptr;
+        Name labels(menu->cls->findProperty(Name("NewButtonNames")) ? "NewButtonNames" : "ButtonNames");
+        bool names = menu->cls->findProperty(labels) != nullptr;
         for (int i = 9; i > index; i--) {
             button->copyValue(menu->propertyAddress(Name("buttonDefaults"), i), menu->propertyAddress(Name("buttonDefaults"), i - 1));
             if (names) {
-                *reinterpret_cast<std::string*>(menu->propertyAddress(Name("ButtonNames"), i)) = *reinterpret_cast<std::string*>(menu->propertyAddress(Name("ButtonNames"), i - 1));
+                *reinterpret_cast<std::string*>(menu->propertyAddress(labels, i)) = *reinterpret_cast<std::string*>(menu->propertyAddress(labels, i - 1));
             }
         }
         button->copyValue(menu->propertyAddress(Name("buttonDefaults"), index), menu->propertyAddress(Name("buttonDefaults"), index - 1));
         if (names) {
-            *reinterpret_cast<std::string*>(menu->propertyAddress(Name("ButtonNames"), index)) = label;
+            *reinterpret_cast<std::string*>(menu->propertyAddress(labels, index)) = label;
         } else {
             *reinterpret_cast<std::string*>(menu->propertyAddress(Name("buttonDefaults"), index) + button->findProperty(Name("Text"))->offset) = label;
         }

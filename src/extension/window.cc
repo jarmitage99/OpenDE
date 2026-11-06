@@ -535,12 +535,34 @@ namespace dx::extension {
         if (!childClass) {
             return nullptr;
         }
+        URootWindow* rootWindow = state().root;
+        if (rootWindow && rootWindow->destroyed) {
+            rootWindow = nullptr;
+        }
+        if (rootWindow) {
+            static const Name mutateName("MutateNewChild");
+            vm::Call mutate(rootWindow, mutateName);
+            if (mutate.valid()) {
+                mutate.obj(this).obj(childClass);
+                mutate.run();
+                UClass* mutated = cast<UClass>(*reinterpret_cast<UObject**>(mutate.parameter(1)));
+                if (mutated) {
+                    childClass = mutated;
+                }
+            }
+        }
         UObject* object = objects::newObject(childClass, objects::packageObject(Name("Transient")), Name(), RF_Transient);
         objects::flushLoads();
         UWindow* child = cast<UWindow>(object);
         if (!child) {
             std::fprintf(stderr, "extension: %s is not a window class\n", childClass->name.c_str());
             return nullptr;
+        }
+        if (rootWindow) {
+            static const Name modifyName("ModifyNewChild");
+            vm::Call modify(rootWindow, modifyName);
+            modify.obj(this).obj(child);
+            runVoid(modify);
         }
         child->attachLast(this);
         window::firstChild(child) = nullptr;

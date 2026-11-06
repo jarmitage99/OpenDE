@@ -57,7 +57,7 @@ else()
 endif()
 
 # miniaudio
-add_library(miniaudio STATIC ${CMAKE_SOURCE_DIR}/vendor/miniaudio/miniaudio.c)
+add_library(miniaudio STATIC ${CMAKE_SOURCE_DIR}/src/audio/miniaudio_vorbis.c)
 target_include_directories(miniaudio SYSTEM PUBLIC ${CMAKE_SOURCE_DIR}/vendor/miniaudio)
 target_compile_definitions(miniaudio PUBLIC MA_NO_ENCODING MA_NO_GENERATION)
 find_package(Threads REQUIRED)

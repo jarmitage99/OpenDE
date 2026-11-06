@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <vector>
 
@@ -48,6 +49,13 @@ namespace dx {
             int32_t row = -1;
             float fade = 0;
             bool pending = false;
+        };
+
+        struct SoundModifier {
+            bool enabled = false;
+            float volume = 1;
+            float radius = 1;
+            float pitch = 1;
         };
 
         struct VoiceStatus {
@@ -116,6 +124,10 @@ namespace dx {
         bool isPlaying(int32_t id);
         float duration(USound* sound);
         void playMusic(UMusic* music, uint8_t section, uint8_t transition);
+        void playOgg(UObject* owner, const std::filesystem::path& intro, const std::filesystem::path& loop, float position, uint8_t transition);
+        float oggPosition();
+        void setSoundModifier(const SoundModifier& modifier);
+        SoundModifier soundModifier();
         void setVolumes(float sound, float music, float speech);
         Volumes volumes();
         MusicStatus musicStatus();

@@ -45,6 +45,7 @@ namespace dx {
     namespace objects {
         void initialize(const std::filesystem::path& gameRoot);
         const std::filesystem::path& gameRoot();
+        std::vector<std::filesystem::path> packageFiles(std::string_view extension);
         Linker* loadPackage(Name packageName);
         Linker* loadPackageFile(Name packageName, const std::filesystem::path& path, bool savedGame);
         void setPackageFile(Name packageName, const std::filesystem::path& path);
