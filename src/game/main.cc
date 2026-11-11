@@ -272,7 +272,7 @@ namespace {
             std::vector<std::pair<int, int>> sizes;
             for (int i = 0; i < SDL_GetNumDisplayModes(display); i++) {
                 SDL_DisplayMode mode {};
-                if (SDL_GetDisplayMode(display, i, &mode) == 0 && mode.w >= 640 && mode.h >= 480) {
+                if (SDL_GetDisplayMode(display, i, &mode) == 0 && mode.w >= 800 && mode.h >= 600) {
                     sizes.emplace_back(mode.w, mode.h);
                 }
             }
@@ -374,18 +374,20 @@ namespace {
             }
             addSwitchChoice(screen, next, "MenuChoice_LimitTextureAnimation", "Limit Texture A|&nimation", "Keeps water and fire textures at 60 updates per second. Off matches the original game.", "LimitTextureAnimation", true);
             addEnumChoice(screen, next + 1, "MenuChoice_AmbientOcclusion", "Ambient |&Occlusion", "Adds soft contact shadows under characters and objects. Higher levels are smoother and cost more performance. Off matches the original game.", "AmbientOcclusion", { "Off", "Low", "Medium", "High" }, 0);
-            if (!browser) {
-                dx::UObject* graphicsDefaults = screen->defaultObject;
-                int gap = *reinterpret_cast<int32_t*>(graphicsDefaults->propertyAddress(dx::Name("choiceVerticalGap")));
-                int sliderRow = *reinterpret_cast<int32_t*>(graphicsDefaults->propertyAddress(dx::Name("choiceStartY"))) + 8 * gap;
-                int32_t& clientHeight = *reinterpret_cast<int32_t*>(graphicsDefaults->propertyAddress(dx::Name("ClientHeight")));
-                dx::deusex::spliceMenuBackground(graphicsDefaults, clientHeight, *reinterpret_cast<int32_t*>(graphicsDefaults->propertyAddress(dx::Name("textureRows"))) * 256);
-                dx::deusex::spliceMenuBackground(graphicsDefaults, sliderRow, sliderRow + gap);
-                dx::deusex::spliceMenuBackground(graphicsDefaults, sliderRow, sliderRow - gap);
+            addEnumChoice(screen, next + 2, "MenuChoice_UIScale", "|&UI Scale", "Size of menus and the HUD. Auto keeps the whole interface on screen. Larger scales can push long conversations and some menus off the screen.", "UIScale", { "Auto", "1x", "2x", "3x", "4x" }, 0);
+            dx::UObject* graphicsDefaults = screen->defaultObject;
+            int gap = *reinterpret_cast<int32_t*>(graphicsDefaults->propertyAddress(dx::Name("choiceVerticalGap")));
+            int sliderRow = *reinterpret_cast<int32_t*>(graphicsDefaults->propertyAddress(dx::Name("choiceStartY"))) + 8 * gap;
+            int32_t& clientHeight = *reinterpret_cast<int32_t*>(graphicsDefaults->propertyAddress(dx::Name("ClientHeight")));
+            int extraRows = browser ? 0 : 2;
+            dx::deusex::spliceMenuBackground(graphicsDefaults, clientHeight, *reinterpret_cast<int32_t*>(graphicsDefaults->propertyAddress(dx::Name("textureRows"))) * 256);
+            dx::deusex::spliceMenuBackground(graphicsDefaults, sliderRow, sliderRow + gap);
+            dx::deusex::spliceMenuBackground(graphicsDefaults, sliderRow, sliderRow - gap);
+            for (int i = 0; i < extraRows; i++) {
                 dx::deusex::spliceMenuBackground(graphicsDefaults, sliderRow + gap, sliderRow);
-                clientHeight += gap;
-                *reinterpret_cast<int32_t*>(graphicsDefaults->propertyAddress(dx::Name("helpPosY"))) += gap;
             }
+            clientHeight += extraRows * gap;
+            *reinterpret_cast<int32_t*>(graphicsDefaults->propertyAddress(dx::Name("helpPosY"))) += extraRows * gap;
             addPlayerSpeedChoice(gameplay, 0);
             dx::UObject* gameplayDefaults = gameplay->defaultObject;
             dx::deusex::spliceMenuBackground(gameplayDefaults, 55, 343);
@@ -450,6 +452,7 @@ namespace {
             render.textureRate = videoSetting("LimitTextureAnimation", 1) != 0 ? 60.0f : 0.0f;
             render.ambientOcclusion = static_cast<dx::OcclusionQuality>(std::clamp(videoSetting("AmbientOcclusion", 0), 0, 3));
             renderer->setOptions(render);
+            dx::extension::setUIScale(std::clamp(videoSetting("UIScale", 0), 0, 4));
             if (browser || options.frames >= 0) {
                 return;
             }

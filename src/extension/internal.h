@@ -41,6 +41,7 @@ namespace dx::extension {
     struct State {
         float viewportWidth = 800;
         float viewportHeight = 600;
+        int uiScale = 0;
         URootWindow* root = nullptr;
         UGC* gc = nullptr;
         UGC* windowGc = nullptr;

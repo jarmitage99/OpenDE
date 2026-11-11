@@ -338,16 +338,16 @@ TEST_CASE("Full width window background covers an ultrawide screen while childre
     setPos(child, 10, 20);
     setSize(child, 64, 32);
 
-    RecordingCanvas canvas(2520, 1080);
+    RecordingCanvas canvas(3360, 1440);
     dx::extension::render(canvas);
     REQUIRE(canvas.tiles.size() == 2);
     CHECK(canvas.tiles[0].x == 0.0f);
     CHECK(canvas.tiles[0].y == 0.0f);
-    CHECK(canvas.tiles[0].w == 2520.0f);
-    CHECK(canvas.tiles[0].h == 1080.0f);
-    CHECK(canvas.tiles[0].u == -150.0f);
-    CHECK(canvas.tiles[0].ul == 1260.0f);
-    CHECK(canvas.tiles[1].x == 320.0f);
+    CHECK(canvas.tiles[0].w == 3360.0f);
+    CHECK(canvas.tiles[0].h == 1440.0f);
+    CHECK(canvas.tiles[0].u == -200.0f);
+    CHECK(canvas.tiles[0].ul == 1680.0f);
+    CHECK(canvas.tiles[1].x == 420.0f);
     CHECK(canvas.tiles[1].y == 40.0f);
     CHECK(canvas.tiles[1].w == 128.0f);
 }
@@ -1548,6 +1548,39 @@ TEST_CASE("The modal mouse focus mode decides whether entering and leaving windo
     CHECK(objectCall(root, "GetFocusWindow") == nullptr);
 }
 
+TEST_CASE("The root window keeps at least 600 virtual rows at 1080p and 4K", "[data]")
+{
+    auto* root = static_cast<dx::extension::UWindow*>(makeRoot());
+    dx::extension::setViewportSize(1920, 1080);
+    layout(1920, 1080);
+    CHECK(root->width() == 1440.0f);
+    CHECK(root->height() == 1080.0f);
+
+    dx::extension::setViewportSize(3840, 2160);
+    layout(3840, 2160);
+    CHECK(root->width() == 960.0f);
+    CHECK(root->height() == 720.0f);
+    dx::extension::setViewportSize(800, 600);
+}
+
+TEST_CASE("A forced UI scale overrides the automatic scale even below 600 virtual rows", "[data]")
+{
+    auto* root = static_cast<dx::extension::UWindow*>(makeRoot());
+    dx::extension::setUIScale(2);
+    dx::extension::setViewportSize(1920, 1080);
+    layout(1920, 1080);
+    CHECK(root->width() == 720.0f);
+    CHECK(root->height() == 540.0f);
+
+    dx::extension::setUIScale(1);
+    dx::extension::setViewportSize(3840, 2160);
+    layout(3840, 2160);
+    CHECK(root->width() == 2880.0f);
+    CHECK(root->height() == 2160.0f);
+    dx::extension::setUIScale(0);
+    dx::extension::setViewportSize(800, 600);
+}
+
 TEST_CASE("Conversation letterbox bars cover an ultrawide screen while the conversation stays in the 16:9 area", "[data]")
 {
     dx::UObject* root = makeRoot("DeusEx.DeusExRootWindow");
@@ -1596,14 +1629,14 @@ TEST_CASE("Scope view borders drawn by script cover an ultrawide screen around a
         REQUIRE(root->cls->name == dx::Name("DeusExRootWindow"));
         dx::UObject* scope = *reinterpret_cast<dx::UObject**>(root->propertyAddress(dx::Name("scopeView")));
         REQUIRE(scope != nullptr);
-        dx::extension::setViewportSize(2520, 1080);
-        layout(2520, 1080);
+        dx::extension::setViewportSize(3360, 1440);
+        layout(3360, 1440);
         {
             dx::vm::Call call(scope, dx::Name("ActivateView"));
             call.i(30).b(false).b(true);
             call.run();
         }
-        RecordingCanvas canvas(2520, 1080);
+        RecordingCanvas canvas(3360, 1440);
         dx::extension::render(canvas);
         auto drawn = [&canvas](float x, float y, float w, float h) {
             for (const RecordedTile& tile : canvas.tiles) {
@@ -1613,11 +1646,11 @@ TEST_CASE("Scope view borders drawn by script cover an ultrawide screen around a
             }
             return false;
         };
-        CHECK(drawn(0, 0, 2520, 284));
-        CHECK(drawn(0, 796, 2520, 284));
-        CHECK(drawn(0, 284, 1004, 512));
-        CHECK(drawn(1516, 284, 1004, 512));
-        CHECK(drawn(1004, 284, 512, 512));
+        CHECK(drawn(0, 0, 3360, 464));
+        CHECK(drawn(0, 976, 3360, 464));
+        CHECK(drawn(0, 464, 1424, 512));
+        CHECK(drawn(1936, 464, 1424, 512));
+        CHECK(drawn(1424, 464, 512, 512));
         dx::extension::setViewportSize(800, 600);
     }
     dx::objects::unloadPackage(dx::Name("01_NYC_UNATCOIsland"));

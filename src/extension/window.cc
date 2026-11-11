@@ -180,7 +180,10 @@ namespace dx::extension {
 
     float virtualScale()
     {
-        return std::max(std::round(fittedHeight() / 600.0f), 1.0f);
+        if (state().uiScale > 0) {
+            return static_cast<float>(state().uiScale);
+        }
+        return std::max(std::floor(fittedHeight() / 600.0f), 1.0f);
     }
 
     float virtualHeight()
@@ -3747,6 +3750,11 @@ namespace dx::extension {
     {
         state().viewportWidth = width;
         state().viewportHeight = height;
+    }
+
+    void setUIScale(int scale)
+    {
+        state().uiScale = scale;
     }
 
     void setFrameCanvas(Canvas2D* canvas)
