@@ -287,7 +287,11 @@ namespace dx::extension {
     {
         buttonwindow::lastInputKey(this) = key;
         playWindowSound(buttonwindow::clickSound(this));
-        sendButtonActivated(this);
+        if (key == IK_RightMouse) {
+            sendButtonActivatedRight(this);
+        } else {
+            sendButtonActivated(this);
+        }
     }
 
     void UButtonWindow::mouseMoved(float newX, float newY)

@@ -681,3 +681,70 @@ TEST_CASE("the player's floor material comes from the mover being stood on", "[d
     CHECK(reinterpret_cast<dx::Name*>(call.returnValue())->str() == "Mobile_Camp");
     releaseWorld(world, "01_NYC_UNATCOIsland");
 }
+
+TEST_CASE("a walking player goes down a flight of stairs without jumping", "[data]")
+{
+    std::unique_ptr<dx::World> world = freshWorld("01_NYC_UNATCOIsland");
+    dx::UObject* player = world->player();
+    dx::console::execute(player, "teleport 1313 1290 130 49152");
+    tick(*world, 20);
+    REQUIRE(dx::actor::Location(player).z == Catch::Approx(127.8f).margin(1.0f));
+    uint8_t walk = dx::console::keyFromName("Shift");
+    uint8_t forward = dx::console::keyFromName("W");
+    dx::console::key(walk, dx::IST_Press, 0);
+    dx::console::key(forward, dx::IST_Press, 0);
+    tick(*world, 90);
+    dx::console::key(forward, dx::IST_Release, 0);
+    dx::console::key(walk, dx::IST_Release, 0);
+    CHECK(dx::pawn::bIsWalking(player) == 1);
+    CHECK(dx::actor::Location(player).z == Catch::Approx(-96.1f).margin(1.0f));
+    CHECK(dx::actor::Physics(player) == 1);
+    releaseWorld(world, "01_NYC_UNATCOIsland");
+}
+
+TEST_CASE("a crouching player walks off the edge of a crate", "[data]")
+{
+    std::unique_ptr<dx::World> world = freshWorld("01_NYC_UNATCOIsland");
+    dx::UObject* player = world->player();
+    dx::console::execute(player, "teleport 688 -395 -50 0");
+    tick(*world, 20);
+    REQUIRE(dx::actor::Location(player).z == Catch::Approx(-51.6f).margin(1.0f));
+    uint8_t duck = dx::console::keyFromName("X");
+    uint8_t forward = dx::console::keyFromName("W");
+    dx::console::key(duck, dx::IST_Press, 0);
+    dx::console::key(forward, dx::IST_Press, 0);
+    tick(*world, 60);
+    dx::console::key(forward, dx::IST_Release, 0);
+    CHECK(dx::pawn::bIsWalking(player) == 1);
+    dx::Vector location = dx::actor::Location(player);
+    dx::console::key(duck, dx::IST_Release, 0);
+    CHECK(location.x > 760.0f);
+    CHECK(location.z == Catch::Approx(-123.2f).margin(1.0f));
+    releaseWorld(world, "01_NYC_UNATCOIsland");
+}
+
+TEST_CASE("a terrorist that cannot jump walks right up to the edge of a crate without falling off", "[data]")
+{
+    std::unique_ptr<dx::World> world = freshWorld("01_NYC_UNATCOIsland");
+    dx::UObject* terrorist = findActor(*world, "Terrorist2");
+    REQUIRE(terrorist != nullptr);
+    tick(*world, 10);
+    dx::vm::gotoState(terrorist, dx::Name("Standing"));
+    dx::vm::Call move(terrorist, dx::Name("SetLocation"));
+    move.v({ 688, -395, -40 }).run();
+    tick(*world, 20);
+    REQUIRE(dx::actor::Location(terrorist).z == Catch::Approx(-51.6f).margin(1.0f));
+    dx::pawn::bCanJump(terrorist) = 0;
+    for (int i = 0; i < 60; i++) {
+        dx::actor::Acceleration(terrorist) = { 400, 200, 0 };
+        dx::actor::LastRenderTime(terrorist) = world->timeSeconds;
+        dx::pawn::DesiredSpeed(terrorist) = 1.0f;
+        tick(*world, 1);
+    }
+    dx::Vector location = dx::actor::Location(terrorist);
+    CHECK(location.x == Catch::Approx(736.2f).margin(1.0f));
+    CHECK(location.y == Catch::Approx(-370.9f).margin(1.0f));
+    CHECK(location.z == Catch::Approx(-51.6f).margin(1.0f));
+    CHECK(dx::actor::Physics(terrorist) == 1);
+    releaseWorld(world, "01_NYC_UNATCOIsland");
+}

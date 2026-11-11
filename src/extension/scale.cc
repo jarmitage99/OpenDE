@@ -334,7 +334,7 @@ namespace dx::extension {
         float value = positionValue(position);
         std::string format = scalewindow::valueFmt(this);
         if (format.empty()) {
-            format = "%d";
+            format = "%g";
         }
         return formatNumber(format, static_cast<double>(value));
     }

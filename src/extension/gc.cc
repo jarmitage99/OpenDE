@@ -506,13 +506,15 @@ namespace dx::extension {
         float bottom = destY + destHeight;
         float scaleU = srcWidth / destWidth;
         float scaleV = srcHeight / destHeight;
-        if (left < clipLeft) {
-            srcX += (clipLeft - left) * scaleU;
-            left = clipLeft;
+        float pixelClipLeft = std::floor(clipLeft);
+        float pixelClipTop = std::floor(clipTop);
+        if (left < pixelClipLeft) {
+            srcX += (pixelClipLeft - left) * scaleU;
+            left = pixelClipLeft;
         }
-        if (top < clipTop) {
-            srcY += (clipTop - top) * scaleV;
-            top = clipTop;
+        if (top < pixelClipTop) {
+            srcY += (pixelClipTop - top) * scaleV;
+            top = pixelClipTop;
         }
         if (right > clipRight) {
             right = clipRight;

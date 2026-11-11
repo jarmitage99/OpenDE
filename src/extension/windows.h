@@ -54,6 +54,7 @@ namespace dx::extension {
         UWindow* modalWindow();
         void absolutePosition(float& outX, float& outY);
         bool sendButtonActivated(UWindow* button);
+        bool sendButtonActivatedRight(UWindow* button);
         void playWindowSound(UObject* sound);
         void drawBackground(UGC* gc);
         void scriptDrawWindow(UGC* gc);
@@ -85,6 +86,7 @@ namespace dx::extension {
         virtual void focusEnteredDescendant(UWindow* window);
         virtual void focusLeftDescendant(UWindow* window);
         virtual bool buttonActivated(UWindow* button);
+        bool buttonActivatedRight(UWindow* button);
         virtual bool toggleChanged(UWindow* button, bool newToggle);
         virtual bool boxOptionSelected(UWindow* box, int32_t buttonNumber);
         virtual bool scalePositionChanged(UWindow* scale, int32_t newTickPosition, float newValue, bool final);

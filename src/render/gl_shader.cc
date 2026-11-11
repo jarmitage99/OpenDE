@@ -33,8 +33,8 @@ out vec4 vClip1;
 #else
 out float gl_ClipDistance[8];
 #endif
-out vec2 vUV;
-out vec2 vLightUV;
+centroid out vec2 vUV;
+centroid out vec2 vLightUV;
 out vec4 vColor;
 out vec3 vWorld;
 out vec3 vNormal;
@@ -70,8 +70,8 @@ void main()
 )";
 
         const char* fragmentSource = R"(
-in vec2 vUV;
-in vec2 vLightUV;
+centroid in vec2 vUV;
+centroid in vec2 vLightUV;
 in vec4 vColor;
 in vec3 vWorld;
 in vec3 vNormal;

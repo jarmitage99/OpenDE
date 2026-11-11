@@ -398,6 +398,31 @@ TEST_CASE("Text window draws one glyph tile per character from the font texture"
     CHECK(canvas.tiles[0].color.g == 1.0f);
 }
 
+TEST_CASE("Left aligned text in a window at a half pixel position keeps the first column of its first glyph", "[data]")
+{
+    dx::UObject* root = makeRoot();
+    dx::UObject* text = newChild(root, "Extension.TextWindow");
+    setText(text, "He");
+    {
+        dx::vm::Call call(text, dx::Name("SetTextAlignments"));
+        call.byte(0).byte(0);
+        call.run();
+    }
+    setPos(text, 100.5f, 50.5f);
+    setSize(text, 50, 20);
+    RecordingCanvas canvas(800, 600);
+    dx::extension::render(canvas);
+    REQUIRE(canvas.tiles.size() == 2);
+    CHECK(canvas.tiles[0].x == 103.0f);
+    CHECK(canvas.tiles[0].y == 53.0f);
+    CHECK(canvas.tiles[0].w == 7.0f);
+    CHECK(canvas.tiles[0].h == 10.0f);
+    CHECK(canvas.tiles[0].u == 10.0f);
+    CHECK(canvas.tiles[0].v == 12.0f);
+    CHECK(canvas.tiles[1].x == 110.0f);
+    CHECK(canvas.tiles[1].u == 213.0f);
+}
+
 TEST_CASE("Clicking a checkbox inside a modal window toggles it", "[data]")
 {
     dx::UObject* root = makeRoot();
@@ -428,6 +453,36 @@ TEST_CASE("Clicking a checkbox inside a modal window toggles it", "[data]")
         dx::vm::Call call(box, dx::Name("GetToggle"));
         CHECK(boolResult(call));
     }
+}
+
+TEST_CASE("Right clicking a menu choice button cycles to the previous value", "[data]")
+{
+    dx::UObject* root = makeRoot();
+    dx::UObject* modal = newChild(root, "Extension.ModalWindow");
+    {
+        dx::vm::Call call(modal, dx::Name("SetWindowAlignments"));
+        call.byte(3).byte(3);
+        call.run();
+    }
+    dx::UObject* choice = newChild(modal, "DeusEx.MenuChoice_LowMedHigh");
+    REQUIRE(choice != nullptr);
+    setPos(choice, 100, 100);
+    {
+        dx::vm::Call call(choice, dx::Name("SetValue"));
+        call.i(1);
+        call.run();
+    }
+    layout(800, 600);
+    dx::extension::mouseMove(105, 105);
+    dx::extension::mouseButton(dx::IK_RightMouse, true);
+    dx::extension::mouseButton(dx::IK_RightMouse, false);
+    CHECK(*reinterpret_cast<int32_t*>(choice->propertyAddress(dx::Name("currentValue"))) == 0);
+    dx::extension::mouseButton(dx::IK_RightMouse, true);
+    dx::extension::mouseButton(dx::IK_RightMouse, false);
+    CHECK(*reinterpret_cast<int32_t*>(choice->propertyAddress(dx::Name("currentValue"))) == 2);
+    dx::extension::mouseButton(dx::IK_LeftMouse, true);
+    dx::extension::mouseButton(dx::IK_LeftMouse, false);
+    CHECK(*reinterpret_cast<int32_t*>(choice->propertyAddress(dx::Name("currentValue"))) == 0);
 }
 
 TEST_CASE("A toggled toggle window stays pressed through clicks and radio group changes", "[data]")
@@ -817,6 +872,28 @@ TEST_CASE("Setting a slider value updates the value text of a menu slider", "[da
         call.run();
     }
     CHECK(*reinterpret_cast<std::string*>(text->propertyAddress(dx::Name("buttonText"))) == "7");
+}
+
+TEST_CASE("A menu slider from 0 to 1 shows the fractional value of its tick", "[data]")
+{
+    dx::UObject* root = makeRoot();
+    dx::UObject* slider = newChild(root, "DeusEx.MenuUISliderButtonWindow");
+    REQUIRE(slider != nullptr);
+    {
+        dx::vm::Call call(slider, dx::Name("SetTicks"));
+        call.i(21).i(0).i(1);
+        call.run();
+    }
+    dx::UObject* scale = *reinterpret_cast<dx::UObject**>(slider->propertyAddress(dx::Name("winSlider")));
+    dx::UObject* text = *reinterpret_cast<dx::UObject**>(slider->propertyAddress(dx::Name("winScaleText")));
+    REQUIRE(scale != nullptr);
+    REQUIRE(text != nullptr);
+    {
+        dx::vm::Call call(scale, dx::Name("SetValue"));
+        call.f(0.55f);
+        call.run();
+    }
+    CHECK(*reinterpret_cast<std::string*>(text->propertyAddress(dx::Name("buttonText"))) == "0.55");
 }
 
 TEST_CASE("Tab moves focus to the first window of the tab group and Down steps to the next", "[data]")

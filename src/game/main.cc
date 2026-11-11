@@ -276,10 +276,13 @@ namespace {
                     sizes.emplace_back(mode.w, mode.h);
                 }
             }
+            std::pair<int, int> current;
+            SDL_GetWindowSize(window, &current.first, &current.second);
+            sizes.push_back(current);
             std::sort(sizes.begin(), sizes.end());
             sizes.erase(std::unique(sizes.begin(), sizes.end()), sizes.end());
-            if (sizes.size() > 16) {
-                sizes.erase(sizes.begin(), sizes.end() - 16);
+            while (sizes.size() > 16) {
+                sizes.erase(sizes.front() == current ? sizes.begin() + 1 : sizes.begin());
             }
             std::string text;
             for (const auto& [width, height] : sizes) {

@@ -953,6 +953,16 @@ namespace dx::extension {
         return false;
     }
 
+    bool UWindow::sendButtonActivatedRight(UWindow* button)
+    {
+        for (UWindow* current = this; current; current = current->parent()) {
+            if (current->buttonActivatedRight(button)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     void UWindow::initWindow()
     {
         window::TextColor(this) = { 0, 255, 0, 255 };
@@ -1189,6 +1199,14 @@ namespace dx::extension {
     bool UWindow::buttonActivated(UWindow* button)
     {
         static const Name eventName("ButtonActivated");
+        vm::Call call(this, eventName);
+        call.obj(button);
+        return runBool(call);
+    }
+
+    bool UWindow::buttonActivatedRight(UWindow* button)
+    {
+        static const Name eventName("ButtonActivatedRight");
         vm::Call call(this, eventName);
         call.obj(button);
         return runBool(call);

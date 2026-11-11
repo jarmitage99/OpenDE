@@ -331,9 +331,7 @@ namespace dx {
             actor::OldLocation(a) = actor::Location(a);
             actor::bJustTeleported(a) = 0;
             bool checkedFall = false;
-            bool mustJump = false;
             float remaining = deltaTime;
-            float radius = actor::CollisionRadius(a);
             float height = actor::CollisionHeight(a);
             Vector extent = cylinderExtent(a);
             while (remaining > 0 && iterations < 8) {
@@ -366,145 +364,6 @@ namespace dx {
                     remaining = 0;
                     pawn::bHitSlopedWall(a) = 0;
                 } else {
-                    Vector forwardCheck = accelDir * radius;
-                    if (!pawn::bAvoidLedges(a)) {
-                        forwardCheck = forwardCheck * 0.5f;
-                    }
-                    bool cautious = (!isPlayerPawn(a) || pawn::bIsWalking(a)) && !pawn::bCanFly(a);
-                    if (cautious) {
-                        Vector location = actor::Location(a);
-                        Vector destination = location + delta + forwardCheck;
-                        world().lineCheck(hit, location, destination, {}, a, TRACE_World | TRACE_Blocking | TRACE_Pawns);
-                        if (hit.time >= 1.0f) {
-                            float desiredDist = delta.size();
-                            float testDown = std::max(4.0f + maxStep + height, 4.0f + height + radius + desiredDist);
-                            world().lineCheck(hit, destination, destination + gravDir * testDown, {}, a, TRACE_World | TRACE_Blocking);
-                            float maxRadius = std::min(14.0f, 0.5f * radius);
-                            bool deep = hit.time >= 1.0f || (hit.normal.z > 0.7f && hit.time * testDown > height + maxStep + 4.0f && hit.time * testDown > height + 4.0f + std::sqrt(std::max(0.0f, 1 - hit.normal.z * hit.normal.z)) * (radius + desiredDist) / hit.normal.z);
-                            if (deep) {
-                                world().lineCheck(hit, destination, destination + gravDir * (maxStep + 4.0f), { maxRadius, maxRadius, height }, a, TRACE_World | TRACE_Blocking);
-                            }
-                            if (hit.time >= 1.0f) {
-                                Vector desiredDir = delta / desiredDist;
-                                Vector ledgeDown = gravDir * (height + 6.0f);
-                                destination = location + accelDir * desiredDist + forwardCheck;
-                                world().lineCheck(hit, destination + ledgeDown, location + ledgeDown - accelDir * (2 * radius), {}, a, TRACE_World | TRACE_Blocking);
-                                ledgeDown = gravDir * (maxStep + 6.0f);
-                                Vector ledgeDir;
-                                bool moveForward = false;
-                                bool goodMove = false;
-                                float desiredSpeed = pawn::DesiredSpeed(a);
-                                float groundSpeed = pawn::GroundSpeed(a);
-                                if (hit.time < 1.0f) {
-                                    if (pawn::bAvoidLedges(a)) {
-                                        ledgeDir = hit.normal;
-                                        ledgeDir.z = 0;
-                                        delta = ledgeDir * (-desiredSpeed * groundSpeed * tick);
-                                        pawn::MoveTimer(a) -= 0.25f;
-                                    } else {
-                                        ledgeDir = Vector { hit.normal.y, -hit.normal.x, 0 }.normal();
-                                        if (ledgeDir.dot(accelDir) < 0) {
-                                            ledgeDir = ledgeDir * -1.0f;
-                                        }
-                                        float dp = ledgeDir.dot(accelDir);
-                                        moveForward = dp < 0.5f || (pawn::bCanJump(a) && dp < 0.7f);
-                                        if (dp < 0.7f) {
-                                            delta = ledgeDir * (std::min(0.8f, desiredSpeed) * groundSpeed * tick);
-                                        } else {
-                                            delta = ledgeDir * (desiredSpeed * groundSpeed * tick);
-                                        }
-                                    }
-                                } else {
-                                    ledgeDir = { desiredDir.y, -desiredDir.x, 0 };
-                                    moveForward = true;
-                                    delta = ledgeDir * (std::min(0.8f, desiredSpeed) * groundSpeed * tick);
-                                    destination = location + delta;
-                                    world().lineCheck(hit, location, destination, extent, a, TRACE_World | TRACE_Blocking);
-                                    if (hit.time >= 1.0f) {
-                                        world().lineCheck(hit, destination, destination + ledgeDown, extent, a, TRACE_World | TRACE_Blocking);
-                                        if (hit.time >= 1.0f) {
-                                            delta = delta * -1.0f;
-                                        } else {
-                                            goodMove = true;
-                                        }
-                                    } else {
-                                        goodMove = true;
-                                    }
-                                }
-                                if (isPlayerPawn(a)) {
-                                    moveForward = false;
-                                    if (!goodMove) {
-                                        destination = location + delta + forwardCheck;
-                                        world().lineCheck(hit, location, destination, extent, a, TRACE_World | TRACE_Blocking);
-                                        if (hit.time >= 1.0f) {
-                                            world().lineCheck(hit, destination, destination + ledgeDown, { maxRadius, maxRadius, height }, a, TRACE_World | TRACE_Blocking);
-                                        }
-                                        if (hit.time >= 1.0f) {
-                                            actor::Acceleration(a) = {};
-                                            delta = {};
-                                        }
-                                    }
-                                }
-                                if (pawn::bCanJump(a) && moveForward) {
-                                    if (!probing(a, "MayFall")) {
-                                        delta = accelDir * desiredDist;
-                                    } else if (!checkedFall) {
-                                        checkedFall = true;
-                                        moveForward = false;
-                                        vm::event(a, Name("MayFall"));
-                                        if (pawn::bCanJump(a)) {
-                                            mustJump = true;
-                                            delta = accelDir * desiredDist;
-                                        }
-                                    }
-                                }
-                                if (!pawn::bCanJump(a)) {
-                                    if (moveForward) {
-                                        destination = location + desiredDir * (desiredDist + radius);
-                                        world().lineCheck(hit, location, destination, extent, a, TRACE_World | TRACE_Blocking);
-                                        if (hit.time >= 1.0f) {
-                                            world().lineCheck(hit, destination, destination + ledgeDown, extent, a, TRACE_World | TRACE_Blocking);
-                                            if (hit.time < 1.0f) {
-                                                destination = location + desiredDir * desiredDist;
-                                                world().lineCheck(hit, destination, destination + ledgeDown, extent, a, TRACE_World | TRACE_Blocking);
-                                            }
-                                        }
-                                        if (hit.time < 1.0f) {
-                                            delta = desiredDir * desiredDist;
-                                        } else {
-                                            moveForward = false;
-                                            if (frand() < 2 * tick) {
-                                                pawn::MoveTimer(a) = -1.0f;
-                                            } else {
-                                                pawn::MoveTimer(a) -= 0.1f;
-                                            }
-                                        }
-                                    }
-                                    if (!moveForward && !goodMove) {
-                                        destination = location + delta + forwardCheck;
-                                        world().lineCheck(hit, location, destination, extent, a, TRACE_World | TRACE_Blocking);
-                                        if (hit.time >= 1.0f) {
-                                            world().lineCheck(hit, destination, destination + ledgeDown, extent, a, TRACE_World | TRACE_Blocking);
-                                        } else if (hit.normal.dot(desiredDir) < pawn::MinHitWall(a)) {
-                                            pawn::MoveTimer(a) = -1.0f;
-                                        }
-                                        if (hit.time >= 1.0f) {
-                                            world().lineCheck(hit, location, location + ledgeDown, { maxRadius, maxRadius, height }, a, TRACE_World | TRACE_Blocking);
-                                            remaining = 0;
-                                            pawn::MoveTimer(a) = -1.0f;
-                                            actor::Acceleration(a) = {};
-                                            if (hit.time >= 1.0f) {
-                                                delta = desiredDir * (-groundSpeed * tick);
-                                            } else {
-                                                delta = {};
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        subMove = delta;
-                    }
                     if (pawn::bHitSlopedWall(a)) {
                         float desiredDist = delta.size();
                         if (desiredDist > 0) {
@@ -581,7 +440,7 @@ namespace dx {
                         hit.time = 0;
                         hit.normal = realNormal;
                     }
-                    if (!mustJump && hit.time < 1.0f && hit.normal.z >= 0.7f) {
+                    if (hit.time < 1.0f && hit.normal.z >= 0.7f) {
                         float friction = zoneGroundFriction(a);
                         if (hit.normal.z < 1.0f && hit.normal.z * friction < 3.3f) {
                             Vector slide = zoneGravity(a) * (deltaTime * deltaTime / (2 * std::max(0.5f, friction)));
@@ -595,11 +454,11 @@ namespace dx {
                             }
                         }
                     } else {
-                        if (!mustJump && pawn::bCanJump(a) && !checkedFall && probing(a, "MayFall")) {
+                        if (pawn::bCanJump(a) && !checkedFall && probing(a, "MayFall")) {
                             checkedFall = true;
                             vm::event(a, Name("MayFall"));
                         }
-                        if (!mustJump && (!pawn::bCanJump(a) || pawn::bIsWalking(a))) {
+                        if (!pawn::bCanJump(a)) {
                             actor::Velocity(a) = {};
                             actor::Acceleration(a) = {};
                             world().farMoveActor(a, actor::OldLocation(a), false, false);
@@ -619,7 +478,7 @@ namespace dx {
                         if (actor::Physics(a) == PHYS_Walking) {
                             setPhysics(a, PHYS_Falling, nullptr);
                         }
-                        if (!mustJump && actor::Physics(a) == PHYS_Falling) {
+                        if (actor::Physics(a) == PHYS_Falling) {
                             float velocityZ = actor::Velocity(a).z;
                             if (!actor::bJustTeleported(a) && deltaTime > remaining) {
                                 actor::Velocity(a) = (actor::Location(a) - actor::OldLocation(a)) / (deltaTime - remaining);
