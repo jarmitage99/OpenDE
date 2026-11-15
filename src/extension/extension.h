@@ -63,5 +63,6 @@ namespace dx {
         void setProjector(Projector projector);
         void setSoundPlayer(SoundPlayer player);
         void reset();
+        void releaseRemoteRoot(UObject* pawn);
     }
 }

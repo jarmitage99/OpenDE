@@ -958,6 +958,8 @@ namespace dx {
             natives().frame = saved;
         }
 
+        RemoteHook remoteHook = nullptr;
+
         void callFunction(Frame& stack, UObject* context, UFunction* function, void* result)
         {
             if (!function) {
@@ -967,7 +969,8 @@ namespace dx {
                 stack.code++;
                 return;
             }
-            if (function->functionFlags & FUNC_Native) {
+            bool remoteNative = remoteHook && context && (function->functionFlags & (FUNC_Native | FUNC_Net)) == (FUNC_Native | FUNC_Net);
+            if ((function->functionFlags & FUNC_Native) && !remoteNative) {
                 if (!function->native) {
                     function->native = bindNative(function);
                 }
@@ -1025,7 +1028,19 @@ namespace dx {
 
             traceCall("call", context, function);
             uint32_t singular = function->functionFlags & FUNC_Singular;
-            if (context && isProbing(context, function->name) && !(singular && context->singular)) {
+            bool remote = remoteHook && context && remoteHook(context, function, locals.get());
+            if (remoteNative && !remote) {
+                if (!function->native) {
+                    function->native = bindNative(function);
+                }
+                Frame stub;
+                stub.object = context;
+                stub.node = function;
+                stub.locals = locals.get();
+                stub.code = function->stub.data();
+                stub.previous = &stack;
+                callNative(stub, context, function, function->native, function->returnParm ? locals.get() + function->returnParm->offset : nullptr);
+            } else if (!remote && context && isProbing(context, function->name) && !(singular && context->singular)) {
                 Frame frame;
                 frame.object = context;
                 frame.node = function;
@@ -1467,6 +1482,9 @@ namespace dx {
         void Call::run()
         {
             if (!function || !object || object->destroyed) {
+                return;
+            }
+            if (remoteHook && remoteHook(object, function, buffer.data())) {
                 return;
             }
             Frame stub;

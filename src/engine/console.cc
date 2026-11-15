@@ -7,6 +7,7 @@
 #include "core/vm.h"
 #include "engine/actor.h"
 #include "engine/input.h"
+#include "engine/net.h"
 #include "engine/resources.h"
 #include "engine/savegame.h"
 #include "engine/world.h"
@@ -303,10 +304,26 @@ namespace dx {
                 return {};
             }
             World* world = World::current;
+            if (iequals(word, "servertravel") && world && world->netMode != NM_Standalone) {
+                vm::Call(world->levelInfo, Name("ServerTravel")).s(rest).b(false).run();
+                return {};
+            }
             if (iequals(word, "open") || iequals(word, "start") || iequals(word, "servertravel")) {
                 if (openMapHook) {
                     int32_t travelType = iequals(word, "open") ? TRAVEL_Partial : (iequals(word, "start") ? TRAVEL_Absolute : TRAVEL_Relative);
                     openMapHook(rest, travelType);
+                }
+                return {};
+            }
+            if (iequals(word, "getping")) {
+                return std::to_string(world && world->net && context ? world->net->playerPing(context) : 0);
+            }
+            if (iequals(word, "getloss")) {
+                return std::to_string(world && world->net && context ? world->net->playerLoss(context) : 0);
+            }
+            if (iequals(word, "disconnect")) {
+                if (openMapHook) {
+                    openMapHook(config::system().get("URL", "LocalMap").value_or("DX.dx"), TRAVEL_Absolute);
                 }
                 return {};
             }

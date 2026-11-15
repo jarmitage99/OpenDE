@@ -3,6 +3,7 @@
 #include "core/vm.h"
 #include "deusex/deusex.h"
 #include "engine/actor.h"
+#include "engine/net.h"
 #include "engine/props_consys.h"
 #include "engine/props_deusex.h"
 #include "engine/savegame.h"
@@ -736,6 +737,28 @@ namespace dx {
                 }
             }
         }
+
+        void applyMatchSpeed(World& world)
+        {
+            static std::unordered_map<UClass*, std::pair<float, float>> baseSpeeds;
+            float speed = 1.0f;
+            std::string option = world.urlOption("Speed");
+            if (world.netMode != NM_Standalone && !option.empty()) {
+                speed = std::clamp(static_cast<float>(std::atof(option.c_str())) / 100.0f, 0.5f, 2.0f);
+            }
+            UClass* human = objects::findClass("DeusEx.Human");
+            for (UObject* object : objects::all()) {
+                UClass* cls = cast<UClass>(object);
+                if (!cls || !cls->defaultObject || !cls->isChildOf(human)) {
+                    continue;
+                }
+                float* ground = reinterpret_cast<float*>(cls->defaultObject->propertyAddress(Name("mpGroundSpeed")));
+                float* water = reinterpret_cast<float*>(cls->defaultObject->propertyAddress(Name("mpWaterSpeed")));
+                const std::pair<float, float>& base = baseSpeeds.try_emplace(cls, *ground, *water).first->second;
+                *ground = base.first * speed;
+                *water = base.second * speed;
+            }
+        }
     }
 
     namespace deusex {
@@ -925,6 +948,8 @@ namespace dx {
 
         void levelLoaded(World& world)
         {
+            resetBots(world);
+            applyMatchSpeed(world);
             DeusExState& s = state();
             s.levelInfo = nullptr;
             s.mission = nullptr;

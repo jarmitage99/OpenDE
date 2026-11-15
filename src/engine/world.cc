@@ -3,12 +3,15 @@
 #include "audio/audio.h"
 #include "core/config.h"
 #include "core/objects.h"
+#include "core/url.h"
 #include "core/vm.h"
 #include "deusex/deusex.h"
 #include "engine/ai.h"
 #include "engine/actor.h"
 #include "engine/anim.h"
+#include "engine/ipdrv.h"
 #include "engine/latent.h"
+#include "engine/net.h"
 #include "engine/props_deusex.h"
 #include "engine/resources.h"
 #include "engine/savegame.h"
@@ -19,6 +22,7 @@
 #include <cstdio>
 #include <ctime>
 #include <deque>
+#include <sstream>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -154,6 +158,14 @@ namespace dx {
     UObject* playerPawnOf(UObject* a)
     {
         if (isPlayerPawn(a) && playerpawn::Player(a)) {
+            return a;
+        }
+        return nullptr;
+    }
+
+    UObject* localPlayerPawnOf(UObject* a)
+    {
+        if (isPlayerPawn(a) && playerpawn::Player(a) && playerpawn::Player(a)->isA(engineClasses().viewport)) {
             return a;
         }
         return nullptr;
@@ -390,6 +402,7 @@ namespace dx {
         if (current == this) {
             current = nullptr;
         }
+        closeLinks();
     }
 
     UObject* World::player() const
@@ -443,6 +456,27 @@ namespace dx {
             return false;
         }
         timeSeconds = 0;
+        levelinfo::NetMode(levelInfo) = netMode;
+        if (netMode == NM_Client) {
+            for (size_t i = 1; i < actors.size(); i++) {
+                UObject* a = actors[i];
+                if (!a) {
+                    continue;
+                }
+                if (actor::bStatic(a) || actor::bNoDelete(a)) {
+                    std::swap(actor::Role(a), actor::RemoteRole(a));
+                    continue;
+                }
+                actors[i] = nullptr;
+                actor::bDeleteMe(a) = 1;
+                a->destroyed = true;
+                collisionHash.remove(a);
+                destroyedActors.push_back(a);
+                pendingCleanup = true;
+            }
+            std::swap(actor::Role(levelInfo), actor::RemoteRole(levelInfo));
+            cleanupDestroyed();
+        }
         for (UObject* a : actors) {
             if (!a) {
                 continue;
@@ -459,6 +493,7 @@ namespace dx {
         if (restored) {
             savegame::levelRestored(*this);
         }
+        levelinfo::TimeSeconds(levelInfo) = timeSeconds;
         char host[256] = {};
 #ifdef _WIN32
         if (const char* name = std::getenv("COMPUTERNAME")) {
@@ -477,7 +512,7 @@ namespace dx {
         levelinfo::bHighDetailMode(levelInfo) = 1;
 
         UObject* game = levelinfo::Game(levelInfo);
-        if (!game) {
+        if (!game && netMode != NM_Client) {
             UClass* gameClass = nullptr;
             std::string gameName = option(parsed, "Game");
             if (!gameName.empty()) {
@@ -584,6 +619,25 @@ namespace dx {
             vm::event(gameInfo, Name("DetailChange"));
         }
         runtimeStart = objects::all().size();
+        if (netMode == NM_DedicatedServer || netMode == NM_ListenServer) {
+            std::string section = config::system().get("Engine.Engine", "GameEngine").value_or("Engine.GameEngine");
+            for (const std::string& entry : config::system().getAll(section, "ServerActors")) {
+                std::istringstream words(entry);
+                std::string className;
+                words >> className;
+                if (className.find("UdpServerUplink") != std::string::npos) {
+                    continue;
+                }
+                UObject* serverActor = spawn(objects::findClass(className), nullptr, Name(), {}, {}, nullptr, true);
+                for (std::string setting; serverActor && words >> setting;) {
+                    size_t equals = setting.find('=');
+                    UProperty* property = equals == std::string::npos ? nullptr : serverActor->cls->findProperty(Name(setting.substr(0, equals)));
+                    if (property) {
+                        property->fromText(serverActor->data + property->offset, setting.substr(equals + 1));
+                    }
+                }
+            }
+        }
 
         UClass* playerClass = nullptr;
         std::string className = option(parsed, "Class");
@@ -595,7 +649,16 @@ namespace dx {
             playerClass = objects::findClass(defaultClass ? *defaultClass : "DeusEx.JCDentonMale");
         }
         objects::flushLoads();
-        if (gameInfo && playerClass) {
+        if (netMode != NM_DedicatedServer && !viewport) {
+            viewport = objects::newObject(engineClasses().viewport, objects::packageObject(Name("Transient")), Name("Viewport0"), 0);
+            UClass* consoleClass = objects::findClass(config::system().get("Engine.Engine", "Console").value_or("Engine.Console"));
+            if (consoleClass) {
+                UObject* consoleObject = objects::newObject(consoleClass, objects::packageObject(Name("Transient")), Name(), 0);
+                console::Viewport(consoleObject) = viewport;
+                player::Console(viewport) = consoleObject;
+            }
+        }
+        if (gameInfo && playerClass && netMode != NM_DedicatedServer) {
             vm::Call login(gameInfo, Name("Login"));
             login.s(parsed.portal).s(optionsString(parsed)).s("").obj(playerClass).run();
             UObject* pawn = login.returnValue() ? *reinterpret_cast<UObject**>(login.returnValue()) : nullptr;
@@ -603,15 +666,6 @@ namespace dx {
                 std::string error = login.parameter(2) ? *reinterpret_cast<std::string*>(login.parameter(2)) : std::string();
                 std::fprintf(stderr, "login failed: %s\n", error.c_str());
                 return false;
-            }
-            if (!viewport) {
-                viewport = objects::newObject(engineClasses().viewport, objects::packageObject(Name("Transient")), Name("Viewport0"), 0);
-                UClass* consoleClass = objects::findClass(config::system().get("Engine.Engine", "Console").value_or("Engine.Console"));
-                if (consoleClass) {
-                    UObject* consoleObject = objects::newObject(consoleClass, objects::packageObject(Name("Transient")), Name(), 0);
-                    console::Viewport(consoleObject) = viewport;
-                    player::Console(viewport) = consoleObject;
-                }
             }
             UObject* oldActor = player::Actor(viewport);
             if (oldActor) {
@@ -634,6 +688,11 @@ namespace dx {
             vm::Call(gameInfo, Name("PostLogin")).obj(pawn).run();
         }
         return true;
+    }
+
+    std::string World::urlOption(std::string_view key) const
+    {
+        return option(parseUrl(url), key);
     }
 
     std::string World::travelString(UObject* player) const
@@ -807,7 +866,7 @@ namespace dx {
         return accepted;
     }
 
-    UObject* World::spawn(UClass* cls, UObject* owner, Name tag, const Vector& location, const Rotator& rotation, UObject* templateActor, bool noCollisionFail, UObject* instigator)
+    UObject* World::spawn(UClass* cls, UObject* owner, Name tag, const Vector& location, const Rotator& rotation, UObject* templateActor, bool noCollisionFail, UObject* instigator, bool remoteOwned)
     {
         if (!cls) {
             return nullptr;
@@ -848,6 +907,9 @@ namespace dx {
         actor::Location(a) = spawnLocation;
         actor::OldLocation(a) = spawnLocation;
         actor::Rotation(a) = rotation;
+        if (remoteOwned) {
+            std::swap(actor::Role(a), actor::RemoteRole(a));
+        }
         collisionHash.update(a);
         region(a) = { levelInfo, -1, 0 };
         if (isPawn(a)) {
@@ -912,6 +974,9 @@ namespace dx {
         if (actor::bDeleteMe(a) || a->destroyed) {
             return true;
         }
+        if (net && !net->canDestroy(a)) {
+            return false;
+        }
         if (a->stateFrame && a->stateFrame->state) {
             vm::event(a, Name("EndState"));
             if (a->destroyed) {
@@ -964,6 +1029,9 @@ namespace dx {
         }
         a->destroyed = true;
         collisionHash.remove(a);
+        if (net) {
+            net->actorDestroyed(a);
+        }
         audio::actorDestroyed(a);
         if (localPlayer == a) {
             localPlayer = nullptr;
@@ -1031,7 +1099,7 @@ namespace dx {
 
     bool World::inStasis(UObject* a)
     {
-        if (timeSeconds - actor::LastRenderTime(a) <= 5.0f || !actor::bStasis(a)) {
+        if (netMode != NM_Standalone || timeSeconds - actor::LastRenderTime(a) <= 5.0f || !actor::bStasis(a)) {
             return false;
         }
         uint8_t physics = actor::Physics(a);
@@ -1041,6 +1109,29 @@ namespace dx {
         uint8_t zone = region(a).zoneNumber;
         float zoneRenderTime = level && level->model && zone < level->model->zones.size() ? level->model->zones[zone].lastRenderTime : 0.0f;
         return timeSeconds - zoneRenderTime > 5.0f || actor::DistanceFromPlayer(a) > 1200.0f;
+    }
+
+    bool World::tickTimer(UObject* a, float deltaSeconds)
+    {
+        float timerRate = actor::TimerRate(a);
+        if (timerRate > 0) {
+            float& counter = actor::TimerCounter(a);
+            counter += deltaSeconds;
+            if (counter >= timerRate) {
+                int passed = static_cast<int>(counter / timerRate);
+                counter -= timerRate * static_cast<float>(passed);
+                if (!actor::bTimerLoop(a)) {
+                    actor::TimerRate(a) = 0;
+                }
+                static const Name nameTimer("Timer");
+                vm::event(a, nameTimer);
+                if (a->destroyed) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     bool World::tickActor(UObject* a, float deltaSeconds)
@@ -1070,74 +1161,94 @@ namespace dx {
             return true;
         }
 
-        bool isPlayer = playerPawnOf(a) != nullptr;
-        if (!isPlayer) {
-            if (levelinfo::bPlayersOnly(levelInfo)) {
+        uint8_t role = actor::Role(a);
+        if (isPawn(a) && role == ROLE_SimulatedProxy) {
+            if (pawn::bIsPlayer(a) && !pawn::bCanFly(a) && !zoneinfo::bWaterZone(zoneOf(a))) {
+                CheckResult floor;
+                Vector location = actor::Location(a);
+                lineCheck(floor, location, location - Vector { 0, 0, 6 }, cylinderExtent(a), a, TRACE_AllColliding);
+                if (floor.time == 1.0f || floor.normal.z < 0.7f) {
+                    if (actor::Velocity(a).z == 0) {
+                        actor::Velocity(a).z = -120.0f;
+                    }
+                    actor::Velocity(a) = actor::Velocity(a) + zoneinfo::ZoneGravity(zoneOf(a)) * (0.5f * deltaSeconds);
+                }
+            }
+            moveSmooth(a, actor::Velocity(a) * deltaSeconds);
+            static const Name nameSimulatedTick("Tick");
+            vm::Call simulatedTick(a, nameSimulatedTick);
+            if (simulatedTick.valid()) {
+                simulatedTick.f(deltaSeconds).run();
+            }
+        } else if (actor::RemoteRole(a) == ROLE_AutonomousProxy) {
+            if (role == ROLE_Authority && !tickTimer(a, deltaSeconds)) {
                 return true;
             }
-            static const Name nameTick("Tick");
-            vm::Call tick(a, nameTick);
-            if (tick.valid()) {
-                tick.f(deltaSeconds).run();
-            }
-        } else {
-            if (inputHook) {
-                inputHook(a, deltaSeconds);
-            }
-            static const Name namePlayerInput("PlayerInput");
-            vm::Call playerInput(a, namePlayerInput);
-            if (playerInput.valid()) {
-                playerInput.f(deltaSeconds).run();
-            }
-            static const Name namePlayerTick("PlayerTick");
-            vm::Call playerTick(a, namePlayerTick);
-            if (playerTick.valid()) {
-                playerTick.f(deltaSeconds).run();
-            }
-            if (inputHook) {
-                inputHook(a, -1.0f);
-            }
-        }
-        if (a->destroyed) {
-            return true;
-        }
-
-        latent::poll(a, deltaSeconds);
-        vm::runStateCode(a);
-        if (a->destroyed) {
-            return true;
-        }
-
-        float timerRate = actor::TimerRate(a);
-        if (timerRate > 0) {
-            float& counter = actor::TimerCounter(a);
-            counter += deltaSeconds;
-            if (counter >= timerRate) {
-                int passed = static_cast<int>(counter / timerRate);
-                counter -= timerRate * static_cast<float>(passed);
-                if (!actor::bTimerLoop(a)) {
-                    actor::TimerRate(a) = 0;
+        } else if (role >= ROLE_SimulatedProxy) {
+            bool local = localPlayerPawnOf(a) != nullptr;
+            bool isPlayer = local || deusex::isBot(a);
+            if (!isPlayer) {
+                if (levelinfo::bPlayersOnly(levelInfo)) {
+                    return true;
                 }
-                static const Name nameTimer("Timer");
-                vm::event(a, nameTimer);
-                if (a->destroyed) {
+                static const Name nameTick("Tick");
+                vm::Call tick(a, nameTick);
+                if (tick.valid()) {
+                    tick.f(deltaSeconds).run();
+                }
+            } else {
+                if (local && inputHook) {
+                    inputHook(a, deltaSeconds);
+                }
+                static const Name namePlayerInput("PlayerInput");
+                vm::Call playerInput(a, namePlayerInput);
+                if (local && playerInput.valid()) {
+                    playerInput.f(deltaSeconds).run();
+                }
+                static const Name namePlayerTick("PlayerTick");
+                vm::Call playerTick(a, namePlayerTick);
+                if (playerTick.valid()) {
+                    playerTick.f(deltaSeconds).run();
+                }
+                if (local && inputHook) {
+                    inputHook(a, -1.0f);
+                }
+            }
+            if (a->destroyed) {
+                return true;
+            }
+
+            if (role >= ROLE_Authority || (a->stateFrame && a->stateFrame->state && (a->stateFrame->state->stateFlags & STATE_Simulated))) {
+                latent::poll(a, deltaSeconds);
+                vm::runStateCode(a);
+            }
+            if (a->destroyed) {
+                return true;
+            }
+
+            if (!tickTimer(a, deltaSeconds)) {
+                return true;
+            }
+
+            float& lifeSpan = actor::LifeSpan(a);
+            if (lifeSpan != 0) {
+                lifeSpan -= deltaSeconds;
+                if (lifeSpan <= 0.0001f) {
+                    static const Name nameExpired("Expired");
+                    vm::event(a, nameExpired);
+                    destroy(a);
                     return true;
                 }
             }
-        }
 
-        float& lifeSpan = actor::LifeSpan(a);
-        if (lifeSpan != 0) {
-            lifeSpan -= deltaSeconds;
-            if (lifeSpan <= 0.0001f) {
-                static const Name nameExpired("Expired");
-                vm::event(a, nameExpired);
-                destroy(a);
+            if (actor::Physics(a) != PHYS_None && role != ROLE_AutonomousProxy) {
+                performPhysics(a, deltaSeconds);
+            }
+            if (a->destroyed) {
                 return true;
             }
-        }
 
-        if (actor::Physics(a) != PHYS_None) {
+        } else if (actor::Physics(a) == PHYS_Falling) {
             performPhysics(a, deltaSeconds);
         }
         if (a->destroyed) {
@@ -1145,12 +1256,15 @@ namespace dx {
         }
 
         if (isPawn(a)) {
-            if (pawn::bIsPlayer(a)) {
+            if (pawn::bIsPlayer(a) && role >= ROLE_AutonomousProxy) {
                 static const Name nameUpdateEyeHeight("UpdateEyeHeight");
                 vm::Call eyeHeight(a, nameUpdateEyeHeight);
                 if (eyeHeight.valid()) {
                     eyeHeight.f(deltaSeconds).run();
                 }
+            }
+            if (role != ROLE_Authority) {
+                return true;
             }
             tickPawnSenses(a, deltaSeconds);
             float& painTime = pawn::PainTime(a);
@@ -1191,6 +1305,7 @@ namespace dx {
             return;
         }
         pendingSeconds = 0;
+        pollLinks();
         timeSeconds += delta;
         levelinfo::TimeSeconds(levelInfo) = timeSeconds;
         std::time_t now = std::time(nullptr);
@@ -1216,6 +1331,7 @@ namespace dx {
             }
         }
         if (!paused) {
+            deusex::tickBots(*this, delta);
             inTick = true;
             newlySpawned.clear();
             int updated = 0;
@@ -1247,7 +1363,7 @@ namespace dx {
                 if (!a || a->destroyed) {
                     continue;
                 }
-                if (playerPawnOf(a)) {
+                if (localPlayerPawnOf(a)) {
                     if (inputHook) {
                         inputHook(a, delta);
                     }
@@ -1268,6 +1384,16 @@ namespace dx {
         }
         tickParity = tickParity ? 0 : 1;
         cleanupDestroyed();
+        if (netMode != NM_Standalone && netMode != NM_Client && !levelinfo::NextURL(levelInfo).empty()) {
+            levelinfo::NextSwitchCountdown(levelInfo) -= deltaSeconds;
+            if (levelinfo::NextSwitchCountdown(levelInfo) <= 0) {
+                travelUrl = levelinfo::NextURL(levelInfo);
+                travelType = TRAVEL_Relative;
+                travelItems = levelinfo::bNextItems(levelInfo) != 0;
+                travelPending = true;
+                levelinfo::NextURL(levelInfo).clear();
+            }
+        }
     }
 
     bool World::calcView(Vector& location, Rotator& rotation, float& fov)

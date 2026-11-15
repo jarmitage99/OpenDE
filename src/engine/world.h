@@ -9,11 +9,16 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace dx {
     class ULevel;
     class UModel;
+
+    namespace net {
+        class Driver;
+    }
 
     struct CheckResult {
         UObject* actor = nullptr;
@@ -62,6 +67,7 @@ namespace dx {
         bool loadMap(const std::string& url);
         std::vector<TravelActor> collectTravel();
         std::string travelString(UObject* player) const;
+        std::string urlOption(std::string_view key) const;
         std::vector<std::pair<std::string, std::string>> arrivalTravelInfo;
         bool replaceTravelInfo = false;
         static void releaseTravel(std::vector<TravelActor>& travel);
@@ -70,7 +76,7 @@ namespace dx {
         bool calcView(Vector& location, Rotator& rotation, float& fov);
         UObject* player() const;
 
-        UObject* spawn(UClass* cls, UObject* owner, Name tag, const Vector& location, const Rotator& rotation, UObject* templateActor, bool noCollisionFail, UObject* instigator = nullptr);
+        UObject* spawn(UClass* cls, UObject* owner, Name tag, const Vector& location, const Rotator& rotation, UObject* templateActor, bool noCollisionFail, UObject* instigator = nullptr, bool remoteOwned = false);
         bool destroy(UObject* actor);
         bool inStasis(UObject* actor);
 
@@ -89,6 +95,7 @@ namespace dx {
         std::shared_ptr<const std::vector<UObject*>> liveActors();
 
         bool tickActor(UObject* actor, float deltaSeconds);
+        bool tickTimer(UObject* actor, float deltaSeconds);
         void tickPawnSenses(UObject* pawn, float deltaSeconds);
         void aiEvents();
         void cleanupDestroyed();
@@ -98,6 +105,9 @@ namespace dx {
         UObject* gameInfo = nullptr;
         UObject* localPlayer = nullptr;
         UObject* viewport = nullptr;
+        uint8_t netMode = 0;
+        int32_t netPort = 0;
+        net::Driver* net = nullptr;
         std::vector<UObject*> actors;
         CollisionHash collisionHash;
         DecalRegistry decals;

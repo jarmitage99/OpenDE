@@ -6,6 +6,7 @@
 #include "engine/ai.h"
 #include "engine/console.h"
 #include "engine/mesh.h"
+#include "engine/net.h"
 #include "engine/resources.h"
 #include "engine/world.h"
 
@@ -557,12 +558,8 @@ namespace dx {
             return request;
         }
 
-        int32_t checkHearSound(UObject* self, const SoundRequest& request, float radiusSquared)
+        int32_t hearSound(UObject* hearer, UObject* self, const SoundRequest& request, float radiusSquared)
         {
-            UObject* hearer = World::current ? world().localPlayer : nullptr;
-            if (!hearer || hearer->destroyed) {
-                return 0;
-            }
             int32_t id = static_cast<int32_t>(self->handle * 16u + request.slot * 2u + (request.noOverride ? 1u : 0u));
             Vector parameters { 100.0f * request.volume, request.radius, 100.0f * request.pitch };
             UObject* viewTarget = isPlayerPawn(hearer) ? playerpawn::ViewTarget(hearer) : nullptr;
@@ -581,7 +578,36 @@ namespace dx {
                     return 0;
                 }
             }
+            if (hearer != world().localPlayer) {
+                static const Name nameClientHearSound("ClientHearSound");
+                vm::Call(hearer, nameClientHearSound).obj(self).i(id).obj(request.sound).v(actor::Location(self)).v(parameters).run();
+                return 0;
+            }
             return clientHearSound(hearer, self, id, request.sound, actor::Location(self), parameters);
+        }
+
+        int32_t checkHearSound(UObject* self, const SoundRequest& request, float radiusSquared, bool owned)
+        {
+            if (!World::current) {
+                return 0;
+            }
+            int32_t played = 0;
+            UObject* local = world().localPlayer;
+            if (local && !local->destroyed) {
+                played = hearSound(local, self, request, radiusSquared);
+            }
+            if (world().net && world().net->server) {
+                UObject* top = self;
+                while (actor::Owner(top)) {
+                    top = actor::Owner(top);
+                }
+                for (UObject* hearer : world().net->remotePlayers()) {
+                    if (!owned || hearer != top) {
+                        hearSound(hearer, self, request, radiusSquared);
+                    }
+                }
+            }
+            return played;
         }
 
         void nativePlaySound(UObject* self, Frame& stack, void* result)
@@ -593,7 +619,7 @@ namespace dx {
             if (request.radius <= 0) {
                 request.radius = 800.0f;
             }
-            vm::ret<int32_t>(result, checkHearSound(self, request, request.radius * request.radius));
+            vm::ret<int32_t>(result, checkHearSound(self, request, request.radius * request.radius, false));
         }
 
         void nativePlayOwnedSound(UObject* self, Frame& stack, void*)
@@ -603,7 +629,7 @@ namespace dx {
                 return;
             }
             float radius = request.radius != 0 ? request.radius : 1600.0f;
-            checkHearSound(self, request, radius * radius);
+            checkHearSound(self, request, radius * radius, true);
         }
 
         void nativeStopSound(UObject*, Frame& stack, void*)

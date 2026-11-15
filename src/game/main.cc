@@ -8,15 +8,24 @@
 #include "engine/canvas_hooks.h"
 #include "engine/console.h"
 #include "engine/input.h"
+#include "engine/net.h"
 #include "engine/resources.h"
 #include "engine/savegame.h"
 #include "engine/world.h"
 #include "extension/extension.h"
 #include "render/lighting.h"
 #include "render/scene_renderer.h"
+#ifdef DX_NETWORKING
+#include "net/gns_transport.h"
+#endif
 
 #include <SDL.h>
 #include <glad/gl.h>
+
+#ifndef _WIN32
+#include <sys/select.h>
+#include <unistd.h>
+#endif
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -31,6 +40,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -165,6 +175,11 @@ namespace {
         int frames = -1;
         int width = 1280;
         int height = 720;
+        int port = 0;
+        int fps = 0;
+        bool dedicated = false;
+        bool headless = false;
+        bool control = false;
         bool sizeGiven = false;
         std::vector<std::string> commands;
         std::vector<std::pair<int, std::string>> actions;
@@ -185,6 +200,16 @@ namespace {
             } else if (arg == "--height" && i + 1 < argc) {
                 options.height = std::atoi(argv[++i]);
                 options.sizeGiven = true;
+            } else if (arg == "--port" && i + 1 < argc) {
+                options.port = std::atoi(argv[++i]);
+            } else if (arg == "--fps" && i + 1 < argc) {
+                options.fps = std::atoi(argv[++i]);
+            } else if (arg == "--headless") {
+                options.headless = true;
+            } else if (arg == "--control") {
+                options.control = true;
+            } else if (arg == "--server" || arg == "-server") {
+                options.dedicated = true;
             } else if (arg == "--exec" && i + 1 < argc) {
                 options.commands.push_back(argv[++i]);
             } else if (arg == "--at" && i + 1 < argc) {
@@ -206,6 +231,279 @@ namespace {
         SDL_Surface* surface = SDL_CreateRGBSurfaceWithFormatFrom(pixels.data(), width, height, 32, width * 4, SDL_PIXELFORMAT_ABGR8888);
         SDL_SaveBMP(surface, path.c_str());
         SDL_FreeSurface(surface);
+    }
+
+    void loadDeusExClasses()
+    {
+        dx::Linker* linker = dx::objects::loadPackage(dx::Name("DeusEx"));
+        const dx::Package& file = linker->file();
+        for (size_t i = 0; i < file.exports().size(); i++) {
+            if (file.exports()[i].classRef == 0) {
+                dx::objects::ensureLoaded(linker->object(static_cast<int32_t>(i + 1)));
+            }
+        }
+        dx::objects::flushLoads();
+    }
+
+    int listenPort(const Options& options)
+    {
+        if (options.port > 0) {
+            return options.port;
+        }
+        return std::atoi(dx::config::system().get("URL", "Port").value_or(std::to_string(dx::net::DefaultPort)).c_str());
+    }
+
+    std::unique_ptr<dx::net::Transport> listenOn(int port)
+    {
+#ifdef DX_NETWORKING
+        return dx::net::listenTransport(port);
+#else
+        static_cast<void>(port);
+        return nullptr;
+#endif
+    }
+
+    std::unique_ptr<dx::net::Transport> connectTo(const std::string& address)
+    {
+#ifdef DX_NETWORKING
+        return dx::net::connectTransport(address);
+#else
+        static_cast<void>(address);
+        return nullptr;
+#endif
+    }
+
+    bool hasOption(const std::string& url, std::string_view key)
+    {
+        size_t mark = url.find('?');
+        while (mark != std::string::npos) {
+            size_t next = url.find('?', mark + 1);
+            std::string item = url.substr(mark + 1, next == std::string::npos ? std::string::npos : next - mark - 1);
+            if (dx::iequals(item.substr(0, item.find('=')), key)) {
+                return true;
+            }
+            mark = next;
+        }
+        return false;
+    }
+
+    std::string joinOptionsFor(const std::string& url)
+    {
+        size_t question = url.find('?');
+        std::string joinOptions = question == std::string::npos ? std::string() : url.substr(question);
+        for (const auto& [key, value] : dx::config::user().section("DefaultPlayer")) {
+            if (!hasOption(joinOptions, key)) {
+                joinOptions += "?" + key + "=" + value;
+            }
+        }
+        return joinOptions;
+    }
+
+    bool isServerAddress(const std::string& url)
+    {
+        std::string host = url.substr(0, url.find_first_of("?/"));
+        if (host.empty()) {
+            return false;
+        }
+        if (host.find(':') != std::string::npos || dx::iequals(host, "localhost")) {
+            return true;
+        }
+        return host.find('.') != std::string::npos && host.find_first_not_of("0123456789.") == std::string::npos;
+    }
+
+    void printPlayers(dx::World& world)
+    {
+        for (dx::UObject* a : world.actors) {
+            if (a && !a->destroyed && dx::isPlayerPawn(a)) {
+                dx::Vector location = dx::actor::Location(a);
+                dx::UObject* info = dx::pawn::PlayerReplicationInfo(a);
+                std::string name = info ? dx::playerreplicationinfo::PlayerName(info) : std::string("?");
+                std::printf("pawn %s name %s role %d at %.1f %.1f %.1f health %d state %s\n", a->cls->name.c_str(), name.c_str(), dx::actor::Role(a), static_cast<double>(location.x), static_cast<double>(location.y), static_cast<double>(location.z), dx::pawn::Health(a), dx::vm::stateName(a).c_str());
+            }
+        }
+    }
+
+    dx::UObject* findPlayer(dx::World& world, const std::string& name)
+    {
+        for (dx::UObject* a : world.actors) {
+            if (a && !a->destroyed && dx::isPlayerPawn(a) && dx::pawn::PlayerReplicationInfo(a) && dx::playerreplicationinfo::PlayerName(dx::pawn::PlayerReplicationInfo(a)) == name) {
+                return a;
+            }
+        }
+        return nullptr;
+    }
+
+    std::vector<dx::UObject*> actorsOfClass(dx::World& world, const std::string& className)
+    {
+        std::vector<dx::UObject*> found;
+        for (dx::UObject* a : world.actors) {
+            if (a && !a->destroyed && a->isA(dx::Name(className))) {
+                found.push_back(a);
+            }
+        }
+        return found;
+    }
+
+    void dumpActors(dx::World& world, const std::string& rest)
+    {
+        std::istringstream words(rest);
+        std::string className;
+        words >> className;
+        std::vector<std::string> names;
+        for (std::string name; words >> name;) {
+            names.push_back(name);
+        }
+        for (dx::UObject* a : actorsOfClass(world, className)) {
+            std::string line = "actor " + a->cls->name.str();
+            for (const std::string& name : names) {
+                dx::UProperty* property = a->cls->findProperty(dx::Name(name));
+                if (property) {
+                    line += " " + name + "=" + property->toText(a->data + property->offset);
+                }
+            }
+            std::printf("%s\n", line.c_str());
+        }
+    }
+
+    void facePlayer(dx::UObject* pawn, const dx::Vector& target)
+    {
+        dx::Vector delta = target - (dx::actor::Location(pawn) + dx::Vector { 0, 0, dx::pawn::BaseEyeHeight(pawn) });
+        dx::Rotator facing;
+        facing.yaw = static_cast<int32_t>(std::atan2(delta.y, delta.x) * 32768.0f / dx::Pi);
+        facing.pitch = static_cast<int32_t>(std::atan2(delta.z, std::sqrt(delta.x * delta.x + delta.y * delta.y)) * 32768.0f / dx::Pi) & 65535;
+        dx::pawn::ViewRotation(pawn) = facing;
+        dx::actor::Velocity(pawn) = {};
+        dx::vm::Call(pawn, dx::Name("ClientSetLocation")).v(dx::actor::Location(pawn)).r(facing).run();
+        dx::Vector location = dx::actor::Location(pawn);
+        std::printf("placed at %.1f %.1f %.1f\n", static_cast<double>(location.x), static_cast<double>(location.y), static_cast<double>(location.z));
+    }
+
+    void placePlayer(dx::World& world, const std::string& rest, bool move)
+    {
+        std::istringstream words(rest);
+        std::string playerName;
+        std::string className;
+        size_t index = 0;
+        float distance = 70.0f;
+        float raise = 0.0f;
+        words >> playerName >> className >> index >> distance >> raise;
+        dx::UObject* pawn = findPlayer(world, playerName);
+        std::vector<dx::UObject*> targets = actorsOfClass(world, className);
+        if (!pawn || index >= targets.size()) {
+            std::printf("place failed\n");
+            return;
+        }
+        dx::Vector target = dx::actor::Location(targets[index]);
+        if (!move) {
+            facePlayer(pawn, target + dx::Vector { 0, 0, raise });
+            return;
+        }
+        for (int step = 0; step < 24; step++) {
+            float angle = static_cast<float>(step % 8) * dx::Pi / 4.0f;
+            float lift = static_cast<float>(step / 8) * 40.0f;
+            dx::Vector spot = target + dx::Vector { std::cos(angle) * distance, std::sin(angle) * distance, lift };
+            if (!world.fastLineCheck(spot, target) || !world.farMoveActor(pawn, spot, true, false)) {
+                continue;
+            }
+            world.farMoveActor(pawn, spot, false, false);
+            facePlayer(pawn, target + dx::Vector { 0, 0, raise });
+            return;
+        }
+        std::printf("place failed\n");
+    }
+
+    void giveItem(dx::World& world, const std::string& rest)
+    {
+        std::istringstream words(rest);
+        std::string playerName;
+        std::string className;
+        words >> playerName >> className;
+        dx::UObject* pawn = findPlayer(world, playerName);
+        dx::UClass* cls = dx::objects::findClass(className);
+        if (pawn && cls && cls->isChildOf(dx::objects::findClass("DeusEx.Augmentation"))) {
+            dx::UObject* system = *reinterpret_cast<dx::UObject**>(pawn->propertyAddress(dx::Name("AugmentationSystem")));
+            dx::vm::Call(system, dx::Name("GivePlayerAugmentation")).obj(cls).run();
+            std::printf("gave %s %s\n", playerName.c_str(), className.c_str());
+            return;
+        }
+        dx::UObject* item = pawn && cls ? world.spawn(cls, nullptr, dx::Name(), dx::actor::Location(pawn), {}, nullptr, true) : nullptr;
+        if (!item) {
+            std::printf("give failed\n");
+            return;
+        }
+        dx::vm::Call(item, dx::Name("Frob")).obj(pawn).obj(nullptr).run();
+        if (!item->destroyed) {
+            world.destroy(item);
+        }
+        std::printf("gave %s %s\n", playerName.c_str(), className.c_str());
+    }
+
+    void frobActor(dx::World& world, const std::string& rest)
+    {
+        std::istringstream words(rest);
+        std::string playerName;
+        std::string className;
+        size_t index = 0;
+        words >> playerName >> className >> index;
+        dx::UObject* pawn = findPlayer(world, playerName);
+        std::vector<dx::UObject*> targets = actorsOfClass(world, className);
+        if (!pawn || index >= targets.size()) {
+            std::printf("frob failed\n");
+            return;
+        }
+        dx::vm::Call(targets[index], dx::Name("Frob")).obj(pawn).obj(nullptr).run();
+        std::printf("frobbed %s\n", targets[index]->name.c_str());
+    }
+
+    bool worldAction(dx::World& world, const std::string& verb, const std::string& rest)
+    {
+        if (verb == "players") {
+            printPlayers(world);
+        } else if (verb == "dump") {
+            dumpActors(world, rest);
+        } else if (verb == "place") {
+            placePlayer(world, rest, true);
+        } else if (verb == "face") {
+            placePlayer(world, rest, false);
+        } else if (verb == "give") {
+            giveItem(world, rest);
+        } else if (verb == "frob") {
+            frobActor(world, rest);
+        } else {
+            return false;
+        }
+        return true;
+    }
+
+    std::vector<std::string> controlLines()
+    {
+        std::vector<std::string> lines;
+#ifndef _WIN32
+        static std::string buffer;
+        static bool open = true;
+        while (open) {
+            fd_set ready;
+            FD_ZERO(&ready);
+            FD_SET(0, &ready);
+            timeval none {};
+            if (select(1, &ready, nullptr, nullptr, &none) <= 0) {
+                break;
+            }
+            char chunk[512];
+            ssize_t count = read(0, chunk, sizeof(chunk));
+            if (count <= 0) {
+                open = false;
+                break;
+            }
+            buffer.append(chunk, static_cast<size_t>(count));
+        }
+        size_t end = 0;
+        while ((end = buffer.find('\n')) != std::string::npos) {
+            lines.push_back(buffer.substr(0, end));
+            buffer.erase(0, end + 1);
+        }
+#endif
+        return lines;
     }
 
     class Game {
@@ -303,18 +601,6 @@ namespace {
             return std::atan(std::tan(adjusted * dx::Pi / 360.0f) * aspect) * 360.0f / dx::Pi;
         }
 
-        void loadDeusExClasses()
-        {
-            dx::Linker* linker = dx::objects::loadPackage(dx::Name("DeusEx"));
-            const dx::Package& file = linker->file();
-            for (size_t i = 0; i < file.exports().size(); i++) {
-                if (file.exports()[i].classRef == 0) {
-                    dx::objects::ensureLoaded(linker->object(static_cast<int32_t>(i + 1)));
-                }
-            }
-            dx::objects::flushLoads();
-        }
-
         dx::UClass* createExtraOptionsScreen(const char* name, const char* title)
         {
             dx::UClass* screen = dx::objects::createSubclass(dx::objects::findClass("DeusEx.MenuScreenOptions"), dx::Name(name));
@@ -398,13 +684,37 @@ namespace {
             dx::deusex::insertMenuButton(settings, 5, "Extra Graphics", screen);
         }
 
+        void addBotsChoice()
+        {
+            dx::UClass* choice = dx::objects::createSubclass(dx::objects::findClass("DeusEx.MenuChoice_ServerMode"), dx::Name("MenuChoice_Bots"));
+            dx::UObject* defaults = choice->defaultObject;
+            *reinterpret_cast<std::string*>(defaults->propertyAddress(dx::Name("actionText"))) = "|&Bots";
+            *reinterpret_cast<std::string*>(defaults->propertyAddress(dx::Name("helpText"))) = "Number of computer controlled players that join the game you host.";
+            *reinterpret_cast<std::string*>(defaults->propertyAddress(dx::Name("configSetting"))) = "ini:Engine.Engine.GameEngine Bots";
+            *reinterpret_cast<int32_t*>(defaults->propertyAddress(dx::Name("defaultValue"))) = 0;
+            for (int i = 0; i <= 8; i++) {
+                *reinterpret_cast<std::string*>(defaults->propertyAddress(dx::Name("enumText"), i)) = std::to_string(i);
+            }
+            *reinterpret_cast<std::string*>(defaults->propertyAddress(dx::Name("ModeNames"), 0)) = "0";
+            *reinterpret_cast<std::string*>(defaults->propertyAddress(dx::Name("ModeNames"), 1)) = "1";
+            std::string section = dx::config::system().get("Engine.Engine", "GameEngine").value_or("DeusEx.DeusExGameEngine");
+            if (!dx::config::system().get(section, "Bots")) {
+                dx::config::system().set(section, "Bots", "0");
+            }
+            for (const char* screen : { "DeusEx.MenuScreenHostGame", "DeusEx.MenuScreenHostLan", "DeusEx.MenuScreenHostNet" }) {
+                dx::UObject* host = dx::objects::findClass(screen)->defaultObject;
+                *reinterpret_cast<dx::UObject**>(host->propertyAddress(dx::Name("choices"), 12)) = choice;
+                *reinterpret_cast<int32_t*>(host->propertyAddress(dx::Name("ServerMode"))) = 1;
+            }
+        }
+
         void addPlayerSpeedChoice(dx::UClass* screen, int index)
         {
             dx::UClass* choice = dx::objects::createSubclass(dx::objects::findClass("DeusEx.MenuUIChoiceSlider"), dx::Name("MenuChoice_PlayerSpeed"));
             *reinterpret_cast<dx::UObject**>(screen->defaultObject->propertyAddress(dx::Name("choices"), index)) = choice;
             dx::UObject* defaults = choice->defaultObject;
             *reinterpret_cast<std::string*>(defaults->propertyAddress(dx::Name("actionText"))) = "Player Sp|&eed";
-            *reinterpret_cast<std::string*>(defaults->propertyAddress(dx::Name("helpText"))) = "Player movement speed in percent of normal speed.";
+            *reinterpret_cast<std::string*>(defaults->propertyAddress(dx::Name("helpText"))) = "Player movement speed in percent of normal speed. Also sets the speed of every player in multiplayer games you host.";
             *reinterpret_cast<std::string*>(defaults->propertyAddress(dx::Name("configSetting"))) = "ini:Engine.Engine.GameEngine PlayerSpeed";
             *reinterpret_cast<int32_t*>(defaults->propertyAddress(dx::Name("numTicks"))) = 16;
             *reinterpret_cast<float*>(defaults->propertyAddress(dx::Name("startValue"))) = 50.0f;
@@ -599,6 +909,7 @@ namespace {
             loadDeusExClasses();
             addFieldOfViewChoice();
             addExtraOptions();
+            addBotsChoice();
             std::string map = options.map;
             std::filesystem::path mapFile = map;
             if (mapFile.has_parent_path() && std::filesystem::is_regular_file(mapFile)) {
@@ -630,8 +941,74 @@ namespace {
             return true;
         }
 
-        bool openMap(const std::string& url, bool carryItems = false)
+        void closeNetwork()
         {
+            driver.reset();
+            transport.reset();
+        }
+
+        bool connect(const std::string& url)
+        {
+            closeNetwork();
+            size_t mark = url.find_first_of("?/");
+            transport = connectTo(url.substr(0, mark));
+            if (!transport) {
+                std::fprintf(stderr, "cannot connect to %s\n", url.c_str());
+                return false;
+            }
+            driver = std::make_unique<dx::net::Driver>(*transport, false);
+            joinOptions = joinOptionsFor(url);
+            return true;
+        }
+
+        void pollNetwork(float delta)
+        {
+            if (!driver) {
+                return;
+            }
+            driver->tick(delta);
+            if (driver->closed) {
+                std::string reason = driver->failure;
+                std::fprintf(stderr, "disconnected: %s\n", reason.c_str());
+                bool inGame = world && world->netMode == dx::NM_Client;
+                closeNetwork();
+                if (inGame || !world) {
+                    openMap(dx::config::system().get("URL", "LocalMap").value_or("DX.dx"));
+                }
+                dx::UObject* player = world ? world->player() : nullptr;
+                if (player) {
+                    dx::vm::Call(player, dx::Name("ClientMessage")).s(reason).run();
+                    dx::console::execute(player, "ShowMainMenu");
+                }
+                return;
+            }
+            if (!driver->welcomeUrl.empty()) {
+                std::string url = driver->welcomeUrl;
+                driver->welcomeUrl.clear();
+                openMap(url, false, dx::NM_Client);
+            }
+        }
+
+        bool openMap(const std::string& url, bool carryItems = false, uint8_t netMode = dx::NM_Standalone)
+        {
+            if (netMode == dx::NM_Standalone && isServerAddress(url)) {
+                return connect(url);
+            }
+            if (netMode == dx::NM_Standalone && hasOption(url, "listen")) {
+                netMode = dx::NM_ListenServer;
+            }
+            if (netMode == dx::NM_Standalone || (netMode == dx::NM_ListenServer && !(driver && driver->server))) {
+                closeNetwork();
+            }
+            if (netMode == dx::NM_ListenServer && !driver) {
+                transport = listenOn(listenPort(options));
+                if (transport) {
+                    driver = std::make_unique<dx::net::Driver>(*transport, true);
+                } else {
+                    std::fprintf(stderr, "cannot listen on port %d\n", listenPort(options));
+                    netMode = dx::NM_Standalone;
+                }
+            }
             std::vector<dx::TravelActor> travel;
             std::vector<std::pair<std::string, std::string>> travelInfo;
             if (carryItems && world) {
@@ -657,10 +1034,10 @@ namespace {
                     return false;
                 }
                 target = map + "?loadgame=" + std::to_string(loadIndex);
-            } else if (world) {
+            } else if (world && world->netMode == dx::NM_Standalone) {
                 dx::savegame::storeDepartingLevel(*world, target);
             }
-            if (loading || world) {
+            if ((loading || world) && netMode == dx::NM_Standalone) {
                 dx::savegame::selectLevel(target);
             }
             dx::extension::reset();
@@ -672,9 +1049,17 @@ namespace {
             if (world && world->level) {
                 dx::objects::unloadPackage(world->level->outermost()->name);
             }
+            if (driver) {
+                driver->setWorld(nullptr);
+            }
             world.reset();
             canvasObject = nullptr;
             world = std::make_unique<dx::World>();
+            world->netMode = netMode;
+            world->netPort = netMode == dx::NM_ListenServer ? listenPort(options) : 0;
+            if (driver) {
+                driver->setWorld(world.get());
+            }
             world->incomingTravel = std::move(travel);
             if (!loading) {
                 bool restart = target.find("?restart") != std::string::npos || target.find("?RESTART") != std::string::npos;
@@ -694,6 +1079,9 @@ namespace {
                 world->url = world->level->url;
             }
             dx::console::resetInput(world->player());
+            if (netMode == dx::NM_Client) {
+                driver->join(joinOptions);
+            }
             return true;
         }
 
@@ -832,17 +1220,28 @@ namespace {
 
         void handleTravel()
         {
+            bool hosting = world && world->netMode == dx::NM_ListenServer;
             if (!pendingMap.empty()) {
-                std::string url = dx::travelUrl(world ? world->url : std::string(), pendingMap, pendingTravelType);
+                std::string url = isServerAddress(pendingMap) ? pendingMap : dx::travelUrl(world ? world->url : std::string(), pendingMap, pendingTravelType);
+                bool keepHosting = hosting && pendingTravelType == dx::TRAVEL_Relative;
+                std::string section = dx::config::system().get("Engine.Engine", "GameEngine").value_or("DeusEx.DeusExGameEngine");
+                if (hasOption(url, "listen") && !hasOption(url, "Bots")) {
+                    url += "?Bots=" + dx::config::system().get(section, "Bots").value_or("0");
+                }
+                if (hasOption(url, "listen") && !hasOption(url, "Speed")) {
+                    url += "?Speed=" + dx::config::system().get(section, "PlayerSpeed").value_or("100");
+                }
                 pendingMap.clear();
-                openMap(url);
+                openMap(url, false, keepHosting ? dx::NM_ListenServer : dx::NM_Standalone);
                 return;
             }
             if (world && world->travelPending) {
-                std::string url = dx::travelUrl(world->url, world->travelUrl, world->travelType);
-                bool items = world->travelItems;
                 world->travelPending = false;
-                openMap(url, items);
+                if (world->netMode == dx::NM_Client) {
+                    return;
+                }
+                std::string url = dx::travelUrl(world->url, world->travelUrl, world->travelType);
+                openMap(url, world->travelItems, hosting ? dx::NM_ListenServer : dx::NM_Standalone);
             }
         }
 
@@ -933,7 +1332,10 @@ namespace {
                     dx::Vector location = dx::actor::Location(player);
                     std::printf("player at %.1f %.1f %.1f yaw %d state %s health %d\n", static_cast<double>(location.x), static_cast<double>(location.y), static_cast<double>(location.z), dx::actor::Rotation(player).yaw & 65535, dx::vm::stateName(player).c_str(), dx::pawn::Health(player));
                 }
+            } else if (world) {
+                worldAction(*world, verb, rest);
             }
+            std::fflush(stdout);
         }
 
         void begin()
@@ -986,6 +1388,7 @@ namespace {
             if (world) {
                 world->tick(delta);
             }
+            pollNetwork(delta);
             dx::extension::tick(delta);
             dx::UObject* console = scriptConsole();
             if (console) {
@@ -1015,6 +1418,13 @@ namespace {
                     scriptedAction(action);
                 }
             }
+            if (options.control) {
+                for (const std::string& line : controlLines()) {
+                    scriptedAction(line);
+                    std::printf("done\n");
+                    std::fflush(stdout);
+                }
+            }
             if (options.frames >= 0 && frame >= options.frames) {
                 if (!options.screenshot.empty()) {
                     std::vector<uint8_t> pixels;
@@ -1027,6 +1437,9 @@ namespace {
             }
             SDL_GL_SwapWindow(window);
             limitFrameRate();
+            if (options.fps > 0) {
+                SDL_Delay(static_cast<uint32_t>(1000 / options.fps));
+            }
         }
 
         bool isRunning() const
@@ -1039,6 +1452,9 @@ namespace {
         Options options;
         std::unique_ptr<dx::SceneRenderer> renderer;
         std::unique_ptr<dx::World> world;
+        std::unique_ptr<dx::net::Transport> transport;
+        std::unique_ptr<dx::net::Driver> driver;
+        std::string joinOptions;
         dx::UObject* canvasObject = nullptr;
         std::string pendingMap;
         int32_t pendingTravelType = dx::TRAVEL_Partial;
@@ -1060,9 +1476,119 @@ namespace {
     };
 }
 
+namespace {
+    int runHeadless(const Options& options)
+    {
+        SDL_Init(SDL_INIT_TIMER);
+        dx::engine::initialize(dx::config::findGameRoot(DEUSEX_GAME_DATA).string());
+        loadDeusExClasses();
+        bool server = options.dedicated;
+        std::unique_ptr<dx::net::Transport> transport = server ? listenOn(listenPort(options)) : connectTo(options.map.substr(0, options.map.find_first_of("?/")));
+        if (!transport) {
+            std::fprintf(stderr, server ? "cannot listen on port %d\n" : "cannot connect\n", listenPort(options));
+            return 1;
+        }
+        dx::net::Driver driver(*transport, server);
+        std::unique_ptr<dx::World> world;
+        std::string pendingMap;
+        if (server) {
+            pendingMap = options.map.empty() ? std::string("DXMP_Smuggler?game=DeusEx.DeathMatchGame") : options.map;
+        }
+        int32_t pendingTravelType = dx::TRAVEL_Absolute;
+        bool running = true;
+        dx::console::openMapHook = [&](const std::string& url, int32_t travelType) {
+            if (server) {
+                pendingMap = url;
+                pendingTravelType = travelType;
+            }
+        };
+        dx::console::quitHook = [&]() {
+            running = false;
+        };
+        uint64_t last = SDL_GetPerformanceCounter();
+        while (running) {
+            if (world && world->travelPending) {
+                world->travelPending = false;
+                if (server) {
+                    pendingMap = world->travelUrl;
+                    pendingTravelType = world->travelType;
+                }
+            }
+            if (!server && !driver.welcomeUrl.empty()) {
+                pendingMap = driver.welcomeUrl;
+                pendingTravelType = dx::TRAVEL_Absolute;
+                driver.welcomeUrl.clear();
+            }
+            if (!pendingMap.empty()) {
+                std::string url = dx::travelUrl(world ? world->url : std::string(), pendingMap, pendingTravelType);
+                pendingMap.clear();
+                dx::extension::reset();
+                driver.setWorld(nullptr);
+                if (world && world->level) {
+                    dx::objects::unloadPackage(world->level->outermost()->name);
+                }
+                world.reset();
+                world = std::make_unique<dx::World>();
+                world->netMode = server ? dx::NM_DedicatedServer : dx::NM_Client;
+                world->netPort = server ? listenPort(options) : 0;
+                world->inputHook = [](dx::UObject* player, float delta) {
+                    dx::console::readInput(player, delta);
+                };
+                driver.setWorld(world.get());
+                if (!world->loadMap(url)) {
+                    std::fprintf(stderr, "cannot load %s\n", url.c_str());
+                    return 1;
+                }
+                if (server) {
+                    std::printf("server running %s on port %d\n", world->url.c_str(), listenPort(options));
+                    std::fflush(stdout);
+                } else {
+                    driver.join(joinOptionsFor(options.map));
+                }
+                for (const std::string& command : options.commands) {
+                    dx::console::execute(nullptr, command);
+                }
+            }
+            uint64_t now = SDL_GetPerformanceCounter();
+            float delta = static_cast<float>(now - last) / static_cast<float>(SDL_GetPerformanceFrequency());
+            last = now;
+            if (world) {
+                world->tick(delta);
+            }
+            driver.tick(delta);
+            if (driver.closed) {
+                std::printf("disconnected: %s\n", driver.failure.c_str());
+                return 1;
+            }
+            if (options.control && world) {
+                for (const std::string& line : controlLines()) {
+                    size_t space = line.find(' ');
+                    std::string verb = line.substr(0, space);
+                    std::string rest = space == std::string::npos ? std::string() : line.substr(space + 1);
+                    if (verb == "exec") {
+                        dx::console::execute(world->player(), rest);
+                    } else if (verb == "press" || verb == "release") {
+                        dx::console::key(dx::console::keyFromName(rest), verb == "press" ? dx::IST_Press : dx::IST_Release, 0);
+                    } else {
+                        worldAction(*world, verb, rest);
+                    }
+                    std::printf("done\n");
+                    std::fflush(stdout);
+                }
+            }
+            SDL_Delay(20);
+        }
+        driver.setWorld(nullptr);
+        return 0;
+    }
+}
+
 int main(int argc, char** argv)
 {
     Options options = parseOptions(argc, argv);
+    if (options.dedicated || options.headless) {
+        return runHeadless(options);
+    }
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) {
         std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
         return 1;

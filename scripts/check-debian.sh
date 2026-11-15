@@ -12,7 +12,7 @@ for release in $releases; do
         apt-get install -y -qq build-essential cmake pkg-config \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
             libxss-dev libxkbcommon-dev libgl-dev libegl-dev libasound2-dev \
-            libpulse-dev libwayland-dev wayland-protocols libdecor-0-dev > /dev/null
+            libpulse-dev libwayland-dev wayland-protocols libdecor-0-dev libssl-dev > /dev/null
         mkdir -p /work
         cd /src
         tar --exclude=./build --exclude="./build-*" --exclude=./game-data --exclude=./reference -cf - . | tar -xf - -C /work

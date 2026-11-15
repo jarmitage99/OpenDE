@@ -1,0 +1,42 @@
+name: iOS
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      debug_enabled:
+        description: 'Open a tmate SSH debug session after the build/test steps, even on success'
+        type: boolean
+        default: false
+
+jobs:
+
+  build-and-test-ios:
+    name: Build And Test iOS (simulator)
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Homebrew dependencies
+      run: brew install ninja protobuf
+
+    - name: Cache Apple dependency builds (OpenSSL, protobuf/Abseil for iOS)
+      uses: actions/cache@v4
+      with:
+        path: build/apple-deps
+        key: apple-deps-ios-${{ hashFiles('cmake/apple/build-apple-deps.sh') }}
+
+    - name: Build xcframework
+      run: ./cmake/apple/make-xcframework.sh --with-deps
+
+    - name: Run iOS simulator smoke test
+      run: ./cmake/apple/run-ios-smoke-test.sh
+
+    # Disabled for now -- mxschmitt/action-tmate has been hanging indefinitely
+    # on GitHub-hosted macOS runners instead of printing the SSH connect string.
+    #- name: Debug session (tmate)
+    #  if: failure() || inputs.debug_enabled
+    #  uses: mxschmitt/action-tmate@v3
+    #  with:
+    #    limit-access-to-actor: true

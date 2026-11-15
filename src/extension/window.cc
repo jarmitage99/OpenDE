@@ -3,6 +3,7 @@
 #include "audio/audio.h"
 #include "core/config.h"
 #include "core/objects.h"
+#include "engine/actor.h"
 #include "engine/input.h"
 #include "engine/props_engine.h"
 #include "engine/resources.h"
@@ -3451,10 +3452,15 @@ namespace dx::extension {
                 return;
             }
             State& s = state();
-            if (s.root && s.root != rootWindow && !s.root->destroyed) {
-                s.root->destroyWindowTree();
+            UObject* owner = playerpawn::Player(object);
+            if (!owner || owner->isA(engineClasses().viewport)) {
+                if (s.root && s.root != rootWindow && !s.root->destroyed) {
+                    s.root->destroyWindowTree();
+                }
+                s.root = rootWindow;
+            } else {
+                s.remoteRoots.push_back(rootWindow);
             }
-            s.root = rootWindow;
             playerpawnext::RootWindow(object) = rootWindow;
             rootwindow::parentPawn(rootWindow) = object;
             window::bIsVisible(rootWindow) = 1;
@@ -3785,6 +3791,17 @@ namespace dx::extension {
         state().soundPlayer = std::move(player);
     }
 
+    void releaseRemoteRoot(UObject* pawn)
+    {
+        std::erase_if(state().remoteRoots, [pawn](URootWindow* remote) {
+            if (rootwindow::parentPawn(remote) != pawn) {
+                return false;
+            }
+            remote->destroyWindowTree();
+            return true;
+        });
+    }
+
     void reset()
     {
         State& s = state();
@@ -3792,6 +3809,10 @@ namespace dx::extension {
             s.root->destroyWindowTree();
         }
         s.root = nullptr;
+        for (URootWindow* remote : s.remoteRoots) {
+            remote->destroyWindowTree();
+        }
+        s.remoteRoots.clear();
         s.keys.fill(false);
         s.keyboardGrabs = 0;
     }

@@ -20,9 +20,9 @@ The original game data is required and is not included.
 
 Debian/Ubuntu with:
 
-    $ sudo apt install build-essential cmake pkg-config libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev libxkbcommon-dev libgl-dev libegl-dev libasound2-dev libpulse-dev libwayland-dev wayland-protocols libdecor-0-dev
+    $ sudo apt install build-essential cmake pkg-config libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev libxkbcommon-dev libgl-dev libegl-dev libasound2-dev libpulse-dev libwayland-dev wayland-protocols libdecor-0-dev libssl-dev
 
-Every library dependency is vendored in `vendor/` and built with the project.
+Every other library dependency is vendored in `vendor/` and built with the project.
 
 ## Game data
 
@@ -88,6 +88,29 @@ written there, and saved games are in `Save/`. The game data directory is
 never written to. Key bindings are the original ones from `User.ini`, for
 example keypad `+` for QuickSave and keypad `/` for QuickLoad.
 
+## Multiplayer
+
+To host, open Multiplayer in the main menu, pick LAN Game or Internet Game,
+then Host Game. To join, type the host's address (`192.168.1.20` or
+`192.168.1.20:7790`) into the IP Address field and press Join Game. The LAN
+screen lists games on the local network.
+
+Wont work with the original clients, OpenDE uses a new protocol. There is no
+master server either so the Internet list stays empty.
+
+From the CLI:
+
+    $ build/bin/deusex "DXMP_Smuggler?game=DeusEx.DeathMatchGame?listen?Bots=4?Speed=150"
+    $ build/bin/deusex 192.168.1.20:7790
+
+Dedicated server:
+
+    $ build/bin/deusex --server "DXMP_Smuggler?game=DeusEx.DeathMatchGame"
+
+Servers use UDP port 7790, or `Port` in the `[URL]` section of `DeusEx.ini`,
+or `--port`. LAN discovery uses UDP port 8777 and the port after the game
+port.
+
 ## Editor
 
     $ build/bin/deused 01_NYC_UNATCOIsland
@@ -117,6 +140,10 @@ Unit tests that need the game data are tagged `[data]`. You can run the ones
 that dont need game data with:
 
     $ build/bin/unit-tests "~[data]"
+
+The `[net]` tests run a dedicated server and two `--headless` clients as
+separate processes, driven over stdin with `--control`. `DX_NET_LOSS`
+(percent) and `DX_NET_LAG` (milliseconds) simulate a bad link.
 
 ## Thanks
 

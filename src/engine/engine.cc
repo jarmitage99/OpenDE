@@ -2,15 +2,16 @@
 #include "core/config.h"
 #include "core/natives.h"
 #include "core/objects.h"
+#include "engine/actor.h"
+#include "engine/console.h"
+#include "engine/ipdrv.h"
+#include "engine/mesh.h"
 #include "engine/props_consys.h"
 #include "engine/props_deusex.h"
 #include "engine/props_engine.h"
 #include "engine/props_extension.h"
 #include "engine/props_fire.h"
-#include "engine/mesh.h"
 #include "engine/resources.h"
-#include "engine/actor.h"
-#include "engine/console.h"
 #include "engine/world.h"
 #include "extension/extension.h"
 
@@ -32,6 +33,7 @@ namespace dx::engine {
         registerEngineNatives();
         extension::registerNatives();
         registerDeusExNatives();
+        registerIpDrvNatives();
         objects::initialize(root);
     }
 

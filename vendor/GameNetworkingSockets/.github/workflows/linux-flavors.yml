@@ -1,0 +1,79 @@
+# We put all of the different linux flavors in a separate workflow,
+# so that we can have a different status badge for them.
+name: Linux flavors
+
+# Triggered from the main CI build workflow
+on:
+  workflow_run:
+    workflows: ["Ubuntu"]
+    types:
+      - completed
+  workflow_dispatch:
+  #workflow_call:
+  #repository_dispatch:
+  #  types: [ build-linux-flavors ]
+
+jobs:
+
+  build-and-test-flavors:
+    #if: false  # Temporarily disable
+    name: Build And Test Unix Flavors
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - build: ubuntu-jammy
+            os: ubuntu-latest
+            docker_image: ubuntu
+            docker_tag: jammy
+            ci_dist_upgrade: 0
+          - build: ubuntu-noble
+            os: ubuntu-latest
+            docker_image: ubuntu
+            docker_tag: noble
+            ci_dist_upgrade: 0
+          #- build: ubuntu-latest
+          #  os: ubuntu-latest
+          #  docker_image: ubuntu
+          #  docker_tag: latest
+          - build: ubuntu-rolling
+            os: ubuntu-latest
+            docker_image: ubuntu
+            docker_tag: rolling
+            ci_dist_upgrade: 1
+          #- build: ubuntu-devel
+          #  os: ubuntu-latest
+          #  docker_image: ubuntu
+          #  docker_tag: devel
+          - build: fedora-latest
+            os: ubuntu-latest
+            docker_image: fedora
+            docker_tag: latest
+            ci_dist_upgrade: 0
+          - build: archlinux-latest
+            os: ubuntu-latest
+            docker_image: archlinux
+            docker_tag: latest
+            ci_dist_upgrade: 0
+          - build: alpine-latest
+            os: ubuntu-latest
+            docker_image: alpine
+            docker_tag: latest
+            ci_dist_upgrade: 0
+    steps:
+      - uses: actions/checkout@v4
+      - name: Launch container
+        run: |
+          docker run -d --rm --name github-docker-builder -e LC_ALL="C" -e LANG="C" -v ${{ github.workspace }}:/build -w /build ${{ matrix.docker_image }}:${{ matrix.docker_tag }} tail -f /dev/null
+          docker ps
+          docker exec -e CI_BUILD=1 -e IMAGE=${{ matrix.docker_image }} -e IMAGE_TAG=${{ matrix.docker_tag }} -t github-docker-builder sh .github/preinstall.sh
+      - name: Update packages
+        run: |
+          docker exec -e CI_BUILD=1 -e IMAGE=${{ matrix.docker_image }} -e IMAGE_TAG=${{ matrix.docker_tag }} -e CI_DIST_UPGRADE=${{ matrix.ci_dist_upgrade }} -t github-docker-builder bash .github/update-packages.sh
+      - name: Install dependencies
+        run: |
+          docker exec -e CI_BUILD=1 -e IMAGE=${{ matrix.docker_image }} -e IMAGE_TAG=${{ matrix.docker_tag }} -t github-docker-builder bash .github/install.sh
+          docker exec -e CI_BUILD=1 -e IMAGE=${{ matrix.docker_image }} -e IMAGE_TAG=${{ matrix.docker_tag }} -t github-docker-builder bash .github/install-post.sh
+      - name: Build and run project
+        run: |
+          docker exec -e CI_BUILD=1 -e IMAGE=${{ matrix.docker_image }} -e IMAGE_TAG=${{ matrix.docker_tag }} -t github-docker-builder bash .github/build.sh

@@ -47,6 +47,9 @@ namespace dx {
         constexpr uint8_t EX_IteratorPop = 0x30;
         constexpr uint8_t EX_IteratorNext = 0x31;
 
+        using RemoteHook = bool (*)(UObject* context, UFunction* function, uint8_t* locals);
+        extern RemoteHook remoteHook;
+
         NativeFunction bindNative(UFunction* function);
         void registerNative(int32_t index, NativeFunction function);
         void registerNative(std::string_view className, std::string_view functionName, NativeFunction function);

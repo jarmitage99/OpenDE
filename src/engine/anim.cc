@@ -44,6 +44,12 @@ namespace dx {
             return actor::TweenRate(a) != 0;
         }
 
+        void updateSimAnim(UObject* a)
+        {
+            float last = 10000.0f * actor::AnimLast(a);
+            actor::SimAnim(a) = { 10000.0f * actor::AnimFrame(a), 5000.0f * actor::AnimRate(a), 1000.0f * actor::TweenRate(a), actor::bAnimLoop(a) ? -last : last };
+        }
+
         void startAnim(UObject* a, Name sequence, float playRate, float tweenTime, bool loop, float minRate)
         {
             UObject* mesh = actor::Mesh(a);
@@ -57,6 +63,7 @@ namespace dx {
                 actor::bAnimFinished(a) = 0;
                 actor::AnimMinRate(a) = minRate != 0 ? minRate * (info.rate / frames) : 0;
                 actor::OldAnimRate(a) = actor::AnimRate(a);
+                updateSimAnim(a);
                 return;
             }
             if (actor::AnimSequence(a).none()) {
@@ -94,6 +101,7 @@ namespace dx {
                 actor::AnimFrame(a) = loop ? 0.0001f : 0.001f;
             }
             actor::OldAnimRate(a) = actor::AnimRate(a);
+            updateSimAnim(a);
         }
 
         void nativePlayAnim(UObject* self, Frame& stack, void*)
@@ -141,6 +149,7 @@ namespace dx {
                 actor::TweenRate(self) = 0;
                 actor::AnimFrame(self) = 0;
             }
+            updateSimAnim(self);
         }
 
         void nativeFinishAnim(UObject* self, Frame& stack, void*)

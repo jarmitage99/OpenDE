@@ -26,7 +26,7 @@ jobs:
             build-essential cmake ninja-build ccache pkg-config \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
             libxss-dev libxkbcommon-dev libgl-dev libegl-dev libasound2-dev \
-            libpulse-dev libwayland-dev wayland-protocols libdecor-0-dev
+            libpulse-dev libwayland-dev wayland-protocols libdecor-0-dev libssl-dev
 
       - name: Setup ccache
         uses: actions/cache@v4
@@ -71,7 +71,7 @@ jobs:
             libX11-devel libXext-devel libXrandr-devel libXcursor-devel libXi-devel \
             libXScrnSaver-devel libxkbcommon-devel mesa-libGL-devel mesa-libEGL-devel \
             alsa-lib-devel pulseaudio-libs-devel wayland-devel wayland-protocols-devel \
-            libdecor-devel git tar gzip
+            libdecor-devel openssl-devel git tar gzip
 
       - name: Checkout
         uses: actions/checkout@v4

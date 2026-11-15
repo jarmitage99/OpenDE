@@ -110,6 +110,7 @@ namespace dx {
     }
 
     UObject* playerPawnOf(UObject* a);
+    UObject* localPlayerPawnOf(UObject* a);
     bool isBlockedBy(UObject* a, UObject* other);
     bool isBasedOn(UObject* a, UObject* other);
     bool isOverlapping(UObject* a, UObject* other);

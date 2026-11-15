@@ -43,6 +43,7 @@ namespace dx::extension {
         float viewportHeight = 600;
         int uiScale = 0;
         URootWindow* root = nullptr;
+        std::vector<URootWindow*> remoteRoots;
         UGC* gc = nullptr;
         UGC* windowGc = nullptr;
         Canvas2D* canvas = nullptr;

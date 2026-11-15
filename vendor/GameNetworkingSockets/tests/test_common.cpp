@@ -1,0 +1,170 @@
+// Misc stuff used in the tests
+
+#include "test_common.h"
+
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <chrono>
+#include <thread>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
+
+#include <steam/steamnetworkingsockets.h>
+#include <steam/isteamnetworkingutils.h>
+
+#ifndef STEAMNETWORKINGSOCKETS_OPENSOURCE
+#include <steam/steam_api.h>
+#endif
+
+static FILE *g_fpLog = nullptr;
+static SteamNetworkingMicroseconds g_logTimeZero;
+ESteamNetworkingSocketsDebugOutputType g_eTestStdoutDetailLevel = k_ESteamNetworkingSocketsDebugOutputType_Msg;
+
+void TEST_SetStdoutDetailLevel( ESteamNetworkingSocketsDebugOutputType eDetailLevel )
+{
+	g_eTestStdoutDetailLevel = eDetailLevel;
+}
+
+static void DebugOutput( ESteamNetworkingSocketsDebugOutputType eType, const char *pszMsg )
+{
+	// !KLUDGE!
+	if ( strstr( pszMsg, "Send Nagle") )
+		return;
+
+	SteamNetworkingMicroseconds time = SteamNetworkingUtils()->GetLocalTimestamp() - g_logTimeZero;
+	if ( g_fpLog )
+		fprintf( g_fpLog, "%10.6f %s\n", time*1e-6, pszMsg );
+	if ( eType <= g_eTestStdoutDetailLevel )
+	{
+		printf( "%10.6f %s\n", time*1e-6, pszMsg );
+		fflush(stdout);
+	}
+	if ( eType == k_ESteamNetworkingSocketsDebugOutputType_Bug )
+	{
+		fflush(stdout);
+		fflush(stderr);
+		if ( g_fpLog )
+			fflush( g_fpLog );
+
+		// !KLUDGE! Our logging (which is done while we hold the lock)
+		// is occasionally triggering this assert.  Just ignore that one
+		// error for now.
+		// Yes, this is a kludge.
+		if ( strstr( pszMsg, "lock held for" ) || strstr( pszMsg, "waited" ) && strstr( pszMsg, "for lock" ) )
+			return;
+
+		fprintf( stderr, "\n\n"
+			"%s\n"
+			"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+			"!!                     TEST FAILED                          !!\n"
+			"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n",
+			pszMsg
+		);
+		fflush( stderr );
+		_exit(1);
+	}
+}
+
+void TEST_Printf( const char *fmt, ... )
+{
+	char text[ 2048 ];
+	va_list ap;
+	va_start( ap, fmt );
+	vsprintf( text, fmt, ap );
+	va_end(ap);
+	char *nl = strchr( text, '\0' ) - 1;
+	if ( nl >= text && *nl == '\n' )
+		*nl = '\0';
+	DebugOutput( k_ESteamNetworkingSocketsDebugOutputType_Msg, text );
+}
+
+void TEST_Fatal( const char *fmt, ... )
+{
+	fflush(stdout);
+	va_list ap;
+	va_start(ap, fmt);
+	vfprintf(stderr, fmt, ap);
+	va_end(ap);
+	fputc('\n', stderr);
+	fflush(stderr);
+	_exit(1);
+}
+
+void TEST_InitLog( const char *pszFilename )
+{
+	if ( g_logTimeZero )
+		return;
+
+	g_logTimeZero = SteamNetworkingUtils()->GetLocalTimestamp();
+
+	SteamNetworkingUtils()->SetDebugOutputFunction( k_ESteamNetworkingSocketsDebugOutputType_Debug, DebugOutput );
+
+	SteamNetworkingUtils()->SetGlobalConfigValueInt32( k_ESteamNetworkingConfig_LogLevel_P2PRendezvous, k_ESteamNetworkingSocketsDebugOutputType_Verbose );
+
+	if ( !g_fpLog )
+		g_fpLog = fopen( pszFilename, "wt" );
+}
+
+void TEST_Init( const SteamNetworkingIdentity *pIdentity )
+{
+	TEST_InitLog( "log.txt" );
+
+	// Test machines are not always realtime systems and may experience thread starvation.
+	// Set very high lock performance warnings so they don't cause test failures.
+	#if __THREAD_SANITIZER__
+		SteamNetworkingSockets_SetLockWaitWarningThreshold( 2000*1000);
+	#else
+		SteamNetworkingSockets_SetLockWaitWarningThreshold( 300*1000 );
+	#endif
+
+	#ifdef STEAMNETWORKINGSOCKETS_OPENSOURCE
+		SteamDatagramErrMsg errMsg;
+		if ( !GameNetworkingSockets_Init( pIdentity, errMsg ) )
+		{
+			fprintf( stderr, "GameNetworkingSockets_Init failed.  %s", errMsg );
+			exit(1);
+		}
+	#else
+		//SteamAPI_Init();
+
+		SteamDatagram_SetUniverse();
+		SteamDatagram_SetAppID( 570 ); // Just set something, doesn't matter what
+
+		SteamDatagramErrMsg errMsg;
+		if ( !SteamDatagramClient_Init( errMsg ) )
+		{
+			fprintf( stderr, "SteamDatagramClient_Init failed.  %s", errMsg );
+			exit(1);
+		}
+
+		if ( pIdentity )
+			SteamNetworkingSockets()->ResetIdentity( pIdentity );
+
+		// Disable auth
+		SteamNetworkingUtils()->SetGlobalConfigValueInt32( k_ESteamNetworkingConfig_IP_AllowWithoutAuth, 2 );
+
+    #endif
+}
+
+void TEST_Kill()
+{
+	#ifdef STEAMNETWORKINGSOCKETS_OPENSOURCE
+		GameNetworkingSockets_Kill();
+	#else
+		SteamDatagramClient_Kill();
+		SteamDatagramServer_Kill();
+	#endif
+}
+
+void TEST_PumpCallbacks()
+{
+	if ( SteamNetworkingSockets() )
+		SteamNetworkingSockets()->RunCallbacks();
+	#ifndef STEAMNETWORKINGSOCKETS_OPENSOURCE
+		if ( SteamGameServerNetworkingSockets() )
+			SteamGameServerNetworkingSockets()->RunCallbacks();
+	#endif
+	std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
+}

@@ -84,6 +84,28 @@ target_link_libraries(imguizmo PUBLIC imgui)
 add_library(stb_image STATIC ${CMAKE_SOURCE_DIR}/vendor/stb/stb_image.c)
 target_include_directories(stb_image SYSTEM PUBLIC ${CMAKE_SOURCE_DIR}/vendor/stb)
 
+# GameNetworkingSockets
+set(DX_NETWORKING OFF)
+if(NOT EMSCRIPTEN)
+    set(DX_NETWORKING ON)
+
+    if(WIN32)
+        set(USE_CRYPTO BCrypt CACHE STRING "" FORCE)
+    endif()
+
+    set(protobuf_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(protobuf_BUILD_PROTOC_BINARIES OFF CACHE BOOL "" FORCE)
+    set(protobuf_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(protobuf_INSTALL OFF CACHE BOOL "" FORCE)
+    set(protobuf_WITH_ZLIB OFF CACHE BOOL "" FORCE)
+    add_subdirectory(${CMAKE_SOURCE_DIR}/vendor/protobuf-3.21.12 EXCLUDE_FROM_ALL SYSTEM)
+
+    set(BUILD_STATIC_LIB ON CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIB OFF CACHE BOOL "" FORCE)
+    set(ENABLE_ICE OFF CACHE BOOL "" FORCE)
+    add_subdirectory(${CMAKE_SOURCE_DIR}/vendor/GameNetworkingSockets SYSTEM)
+endif()
+
 # Catch
 add_library(Catch2 STATIC ${CMAKE_SOURCE_DIR}/vendor/catch-3.16.0/catch_amalgamated.cpp)
 target_include_directories(Catch2 SYSTEM PUBLIC ${CMAKE_SOURCE_DIR}/vendor/catch-3.16.0)

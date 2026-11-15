@@ -5,6 +5,7 @@
 #include "engine/ai.h"
 #include "engine/canvas_hooks.h"
 #include "engine/console.h"
+#include "engine/net.h"
 #include "engine/resources.h"
 #include "engine/world.h"
 
@@ -428,7 +429,8 @@ namespace dx {
         {
             vm::finish(stack);
             std::string port = config::system().get("URL", "Port").value_or("7777");
-            vm::ret<std::string>(result, ":" + std::to_string(std::atoi(port.c_str())));
+            int32_t number = World::current && World::current->netPort ? World::current->netPort : std::atoi(port.c_str());
+            vm::ret<std::string>(result, ":" + std::to_string(number));
         }
 
         void nativeDescribeSpec(UObject*, Frame& stack, void*)
@@ -567,6 +569,12 @@ namespace dx {
             vm::ret<std::string>(result, std::string());
         }
 
+        void nativeGetPlayerNetworkAddress(UObject* self, Frame& stack, void* result)
+        {
+            vm::finish(stack);
+            vm::ret<std::string>(result, World::current && World::current->net ? World::current->net->playerAddress(self) : std::string());
+        }
+
         void nativeParseKillMessage(UObject*, Frame& stack, void* result)
         {
             std::string killer = vm::get<std::string>(stack);
@@ -650,7 +658,7 @@ namespace dx {
         vm::registerNative("PlayerPawn", "GetEntryLevel", nativeGetEntryLevel);
         vm::registerNative("PlayerPawn", "CopyToClipboard", nativeCopyToClipboard);
         vm::registerNative("PlayerPawn", "PasteFromClipboard", nativePasteFromClipboard);
-        vm::registerNative("PlayerPawn", "GetPlayerNetworkAddress", nativeEmptyString);
+        vm::registerNative("PlayerPawn", "GetPlayerNetworkAddress", nativeGetPlayerNetworkAddress);
         vm::registerNative("GameInfo", "GetNetworkNumber", nativeEmptyString);
         vm::registerNative("GameInfo", "ParseKillMessage", nativeParseKillMessage);
         vm::registerNative(314, nativeWarp);

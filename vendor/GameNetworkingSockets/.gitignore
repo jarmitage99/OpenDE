@@ -1,0 +1,82 @@
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+/bin
+
+# Ignore CMake outputs
+compile_commands.json
+CMakeCache.txt
+CMakeFiles
+Makefile
+cmake_install.cmake
+
+# Per-user presets, which are local by design and inherit from CMakePresets.json
+CMakeUserPresets.json
+
+# Ignore outputs from "perf record"
+perf.data
+perf.data.old
+
+# Default/recommended install directory for vcpkg
+**/vcpkg
+
+# AI assistant files
+.claude/
+CLAUDE.md
+AGENTS.md
+
+# Other misc stuff
+*.VC.*
+**/.vscode
+/build
+/build-*
+/build.bat
+**/log.txt
+**/.vs
+/src/steamnetworkingsockets/Messageswin64Debug/*
+/src/steamnetworkingsockets/certtool/win64/*
+/src/steamnetworkingsockets/clientlib/win64/*
+*.swp
+/.github/build-ci-ccache
+*.log
+*build-ci-ccache*
+vcpkg_installed
+.p4config
+P4CONFIG
+
+# We use cmake, so no Visual studio project files should be in git
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.vpc_crc
+*.vpc.sentinel
+*_from_partner.bat
+src/mp.bat
+*_changes.html
+
+# Unfortunately, in the partner branch we compile our generated protobufs
+# directly into the common folder
+src/common/*.pb.cc
+src/common/*.pb.h
+
+# Protobuf has some test scripts and we get warnings about line endings
+src/external/protobuf-3.15.3/**/*.sh
+
+#
+# Entries below here should be items that might differ between the main and partner branches
+#
+
+# Partner branch puts extra 'modules' into this folder.  We don't do any of that.
+/modules
