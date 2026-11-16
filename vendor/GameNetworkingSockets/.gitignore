@@ -66,11 +66,6 @@ P4CONFIG
 src/mp.bat
 *_changes.html
 
-# Unfortunately, in the partner branch we compile our generated protobufs
-# directly into the common folder
-src/common/*.pb.cc
-src/common/*.pb.h
-
 # Protobuf has some test scripts and we get warnings about line endings
 src/external/protobuf-3.15.3/**/*.sh
 
