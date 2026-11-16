@@ -122,7 +122,7 @@ namespace dx {
             setsockopt(handle, SOL_SOCKET, SO_BROADCAST, reinterpret_cast<const char*>(&enabled), sizeof(enabled));
 #ifdef _WIN32
             u_long nonBlocking = 1;
-            ioctlsocket(handle, FIONBIO, &nonBlocking);
+            ioctlsocket(handle, static_cast<long>(FIONBIO), &nonBlocking);
 #else
             fcntl(handle, F_SETFL, fcntl(handle, F_GETFL, 0) | O_NONBLOCK);
 #endif
