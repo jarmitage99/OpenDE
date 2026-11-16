@@ -56,7 +56,7 @@ namespace dx {
         bool wantsMouse();
 
         void setViewportSize(float width, float height);
-        void setUIScale(int scale);
+        void setUIScale(float scale);
         void setFrameCanvas(Canvas2D* canvas);
         void setViewportDrawer(ViewportDrawer drawer);
         void setActorDrawer(ActorDrawer drawer);

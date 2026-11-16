@@ -122,3 +122,16 @@ TEST_CASE("Console.ConsoleCommand prints the command output to the console", "[d
     }
     dx::objects::unloadPackage(dx::Name("01_NYC_UNATCOIsland"));
 }
+
+TEST_CASE("the menu writing back the whole part of a custom UI scale keeps the custom value", "[data]")
+{
+    dx::engine::initialize(DEUSEX_GAME_DATA);
+    std::string original = dx::console::execute(nullptr, "get ini:Engine.Engine.ViewportManager UIScale");
+    dx::console::execute(nullptr, "set ini:Engine.Engine.ViewportManager UIScale 1.5");
+    CHECK(dx::console::execute(nullptr, "get ini:Engine.Engine.ViewportManager UIScale") == "1.5");
+    dx::console::execute(nullptr, "set ini:Engine.Engine.ViewportManager UIScale 1");
+    CHECK(dx::console::execute(nullptr, "get ini:Engine.Engine.ViewportManager UIScale") == "1.5");
+    dx::console::execute(nullptr, "set ini:Engine.Engine.ViewportManager UIScale 2");
+    CHECK(dx::console::execute(nullptr, "get ini:Engine.Engine.ViewportManager UIScale") == "2");
+    dx::console::execute(nullptr, "set ini:Engine.Engine.ViewportManager UIScale " + (original.empty() ? std::string("0") : original));
+}

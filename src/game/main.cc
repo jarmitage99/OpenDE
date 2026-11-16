@@ -675,10 +675,11 @@ namespace {
             clientHeight += extraRows * gap;
             *reinterpret_cast<int32_t*>(graphicsDefaults->propertyAddress(dx::Name("helpPosY"))) += extraRows * gap;
             addPlayerSpeedChoice(gameplay, 0);
+            addFixVanillaBugsChoice(gameplay, 1);
             dx::UObject* gameplayDefaults = gameplay->defaultObject;
-            dx::deusex::spliceMenuBackground(gameplayDefaults, 55, 343);
-            *reinterpret_cast<int32_t*>(gameplayDefaults->propertyAddress(dx::Name("ClientHeight"))) -= 288;
-            *reinterpret_cast<int32_t*>(gameplayDefaults->propertyAddress(dx::Name("helpPosY"))) -= 288;
+            dx::deusex::spliceMenuBackground(gameplayDefaults, 91, 343);
+            *reinterpret_cast<int32_t*>(gameplayDefaults->propertyAddress(dx::Name("ClientHeight"))) -= 252;
+            *reinterpret_cast<int32_t*>(gameplayDefaults->propertyAddress(dx::Name("helpPosY"))) -= 252;
             dx::UObject* settings = dx::objects::findClass("DeusEx.MenuSettings")->defaultObject;
             dx::deusex::insertMenuButton(settings, 3, "Extra Gameplay", gameplay);
             dx::deusex::insertMenuButton(settings, 5, "Extra Graphics", screen);
@@ -726,6 +727,21 @@ namespace {
             }
         }
 
+        void addFixVanillaBugsChoice(dx::UClass* screen, int index)
+        {
+            dx::UClass* choice = dx::objects::createSubclass(dx::objects::findClass("DeusEx.MenuChoice_DetailTextures"), dx::Name("MenuChoice_FixVanillaBugs"));
+            *reinterpret_cast<dx::UObject**>(screen->defaultObject->propertyAddress(dx::Name("choices"), index)) = choice;
+            dx::UObject* defaults = choice->defaultObject;
+            *reinterpret_cast<std::string*>(defaults->propertyAddress(dx::Name("actionText"))) = "Fix |&Vanilla Bugs";
+            *reinterpret_cast<std::string*>(defaults->propertyAddress(dx::Name("helpText"))) = "Fixes bugs of the original game, such as stunned or gassed enemies attacking as soon as they are hit. Off matches the original game.";
+            *reinterpret_cast<std::string*>(defaults->propertyAddress(dx::Name("configSetting"))) = "ini:Engine.Engine.GameEngine FixVanillaBugs";
+            *reinterpret_cast<int32_t*>(defaults->propertyAddress(dx::Name("defaultValue"))) = 1;
+            std::string section = dx::config::system().get("Engine.Engine", "GameEngine").value_or("DeusEx.DeusExGameEngine");
+            if (!dx::config::system().get(section, "FixVanillaBugs")) {
+                dx::config::system().set(section, "FixVanillaBugs", "True");
+            }
+        }
+
         void applyPlayerSpeed()
         {
             std::string section = dx::config::system().get("Engine.Engine", "GameEngine").value_or("DeusEx.DeusExGameEngine");
@@ -762,7 +778,8 @@ namespace {
             render.textureRate = videoSetting("LimitTextureAnimation", 1) != 0 ? 60.0f : 0.0f;
             render.ambientOcclusion = static_cast<dx::OcclusionQuality>(std::clamp(videoSetting("AmbientOcclusion", 0), 0, 3));
             renderer->setOptions(render);
-            dx::extension::setUIScale(std::clamp(videoSetting("UIScale", 0), 0, 4));
+            float uiScale = static_cast<float>(std::atof(dx::config::system().get(videoSection(), "UIScale").value_or("0").c_str()));
+            dx::extension::setUIScale(std::max(uiScale, 0.0f));
             if (browser || options.frames >= 0) {
                 return;
             }
@@ -1384,6 +1401,7 @@ namespace {
             }
             viewportTime += static_cast<double>(delta);
             applyPlayerSpeed();
+            dx::deusex::applyVanillaFixes();
             applyRenderOptions();
             if (world) {
                 world->tick(delta);

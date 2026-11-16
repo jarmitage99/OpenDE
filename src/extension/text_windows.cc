@@ -452,7 +452,7 @@ namespace dx::extension {
                 gc::tileColor(gc) = (color.r || color.g || color.b) ? color : Color { 255, 255, 255, 255 };
                 float boxX = right ? hMargin + w - boxWidth : hMargin;
                 float boxY = vMargin + std::floor((h - boxHeight) * 0.5f);
-                gc->drawStretched(boxX, boxY, boxWidth, boxHeight, 0, 0, textureWidth(texture), textureHeight(texture), texture);
+                gc->drawStretched(boxX, boxY, boxWidth, boxHeight, 0, 0, boxWidth, boxHeight, texture);
                 gc->resetState(this, gc->offsetX, gc->offsetY);
             }
         }
@@ -1787,6 +1787,8 @@ namespace dx::extension {
                 if (hasCursor) {
                     editwindow::editCursor(edit) = cursor;
                     window::defaultCursor(edit) = cursor;
+                    window::defaultHotX(edit) = -1;
+                    window::defaultHotY(edit) = -1;
                 }
                 if (hasShadow) {
                     editwindow::editCursorShadow(edit) = shadow;

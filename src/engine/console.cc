@@ -14,6 +14,7 @@
 
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -396,6 +397,12 @@ namespace dx {
                     std::string section = iniSection(className.substr(4));
                     if (section.empty()) {
                         return "Unrecognized ini key " + className;
+                    }
+                    if (iequals(propertyName, "UIScale")) {
+                        float custom = static_cast<float>(std::atof(config::system().get(section, propertyName).value_or("0").c_str()));
+                        if (custom != std::floor(custom) && std::atoi(valueRest.c_str()) == static_cast<int>(custom)) {
+                            return {};
+                        }
                     }
                     config::system().set(section, propertyName, valueRest);
                     config::system().save();

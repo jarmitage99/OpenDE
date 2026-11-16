@@ -41,7 +41,7 @@ namespace dx::extension {
     struct State {
         float viewportWidth = 800;
         float viewportHeight = 600;
-        int uiScale = 0;
+        float uiScale = 0;
         URootWindow* root = nullptr;
         std::vector<URootWindow*> remoteRoots;
         UGC* gc = nullptr;

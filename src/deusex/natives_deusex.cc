@@ -3,6 +3,7 @@
 #include "core/vm.h"
 #include "deusex/deusex.h"
 #include "engine/actor.h"
+#include "engine/latent.h"
 #include "engine/net.h"
 #include "engine/props_consys.h"
 #include "engine/props_deusex.h"
@@ -759,6 +760,107 @@ namespace dx {
                 *water = base.second * speed;
             }
         }
+
+        bool callBool(vm::Call& call)
+        {
+            call.run();
+            return call.returnValue() && *reinterpret_cast<uint32_t*>(call.returnValue()) != 0;
+        }
+
+        void nativeIncapacitatedTakeDamage(UObject* self, Frame& stack, void*)
+        {
+            int32_t damage = vm::get<int32_t>(stack);
+            UObject* instigatedBy = vm::get<UObject*>(stack);
+            Vector hitLocation = vm::get<Vector>(stack);
+            Vector momentum = vm::get<Vector>(stack);
+            Name damageType = vm::get<Name>(stack);
+            vm::finish(stack);
+            static const Name nameTakeDamageBase("TakeDamageBase");
+            vm::Call(self, nameTakeDamageBase).i(damage).obj(instigatedBy).v(hitLocation).v(momentum).n(damageType).b(true).run();
+        }
+
+        void nativeIncapacitatedReactToInjury(UObject* self, Frame& stack, void*)
+        {
+            UObject* instigatedBy = vm::get<UObject*>(stack);
+            Name damageType = vm::get<Name>(stack);
+            uint8_t hitPos = vm::get<uint8_t>(stack);
+            vm::finish(stack);
+            static const Name nameTearGas("TearGas");
+            static const Name nameHalonGas("HalonGas");
+            static const Name nameStunned("Stunned");
+            if (damageType == nameTearGas || damageType == nameHalonGas || damageType == nameStunned || pawn::Health(self) <= 0) {
+                return;
+            }
+            if (instigatedBy && (scriptedpawn::bLookingForInjury(self) || scriptedpawn::bLookingForIndirectInjury(self))) {
+                static const Name nameShouldReact("ShouldReactToInjuryType");
+                static const Name nameIncreaseAgitation("IncreaseAgitation");
+                static const Name nameIncreaseFear("IncreaseFear");
+                static const Name nameSetEnemy("SetEnemy");
+                static const Name nameSetDistressTimer("SetDistressTimer");
+                static const Name nameSetNextState("SetNextState");
+                static const Name nameIsFearful("IsFearful");
+                static const Name nameHandlingEnemy("HandlingEnemy");
+                static const Name nameFleeing("Fleeing");
+                vm::Call hate(self, nameShouldReact);
+                hate.n(damageType).b(scriptedpawn::bHateInjury(self) != 0).b(scriptedpawn::bHateIndirectInjury(self) != 0);
+                bool hateThisInjury = callBool(hate);
+                vm::Call fear(self, nameShouldReact);
+                fear.n(damageType).b(scriptedpawn::bFearInjury(self) != 0).b(scriptedpawn::bFearIndirectInjury(self) != 0);
+                bool fearThisInjury = callBool(fear);
+                if (hateThisInjury) {
+                    vm::Call(self, nameIncreaseAgitation).obj(instigatedBy).run();
+                }
+                if (fearThisInjury) {
+                    vm::Call(self, nameIncreaseFear).obj(instigatedBy).f(2.0f).run();
+                }
+                vm::Call enemy(self, nameSetEnemy);
+                enemy.obj(instigatedBy);
+                if (callBool(enemy)) {
+                    vm::Call(self, nameSetDistressTimer).run();
+                    vm::Call(self, nameSetNextState).n(nameHandlingEnemy).run();
+                } else {
+                    vm::Call fearful(self, nameIsFearful);
+                    if (fearThisInjury && callBool(fearful)) {
+                        vm::Call(self, nameSetDistressTimer).run();
+                        vm::Call(self, nameSetEnemy).obj(instigatedBy).skip().b(true).run();
+                        vm::Call(self, nameSetNextState).n(nameFleeing).run();
+                    }
+                }
+            }
+            if (hitPos != 0) {
+                static const Name namePlayTakingHit("PlayTakingHit");
+                vm::Call(self, namePlayTakingHit).byte(hitPos).run();
+                scriptedpawn::TakeHitTimer(self) = 2.0f;
+            }
+        }
+
+        bool vanillaFixes = false;
+
+        void overrideStateFunction(UClass* cls, const char* stateName, const char* functionName, NativeFunction native)
+        {
+            UState* state = cls->findState(Name(stateName));
+            UFunction* function = state ? state->findStateFunction(Name(functionName)) : nullptr;
+            if (function) {
+                function->scriptOverride = native;
+            }
+        }
+
+        void resumeIncapacitatedAnim(UObject* pawn)
+        {
+            if (!vanillaFixes || !pawn->stateFrame || pawn->stateFrame->latentAction != latent::Sleep || !actor::bAnimFinished(pawn) || actor::bAnimLoop(pawn)) {
+                return;
+            }
+            static const Name nameStunned("Stunned");
+            static const Name nameRubbingEyes("RubbingEyes");
+            static const Name namePlayStunned("PlayStunned");
+            static const Name namePlayRubbingEyes("PlayRubbingEyes");
+            Name state = vm::stateName(pawn);
+            if (state == nameStunned) {
+                vm::Call(pawn, namePlayStunned).run();
+            } else if (state == nameRubbingEyes) {
+                vm::Call(pawn, namePlayRubbingEyes).run();
+            }
+        }
     }
 
     namespace deusex {
@@ -816,6 +918,7 @@ namespace dx {
                 actor::PrePivot(pawn) = scriptedpawn::DesiredPrePivot(pawn);
                 prePivotTime = 0;
             }
+            resumeIncapacitatedAnim(pawn);
             bool lowPriority = !(scriptedpawn::bTickVisibleOnly(pawn) && actor::DistanceFromPlayer(pawn) > 1200.0f);
 
             auto decrement = [deltaSeconds](float& timer) {
@@ -946,8 +1049,23 @@ namespace dx {
             return !pawn->destroyed;
         }
 
+        void applyVanillaFixes()
+        {
+            std::string section = config::system().get("Engine.Engine", "GameEngine").value_or("DeusEx.DeusExGameEngine");
+            vanillaFixes = !iequals(config::system().get(section, "FixVanillaBugs").value_or("True"), "False");
+            UClass* scripted = engineClasses().scriptedPawn;
+            if (!scripted) {
+                return;
+            }
+            for (const char* stateName : { "Stunned", "RubbingEyes" }) {
+                overrideStateFunction(scripted, stateName, "TakeDamage", vanillaFixes ? nativeIncapacitatedTakeDamage : nullptr);
+                overrideStateFunction(scripted, stateName, "ReactToInjury", vanillaFixes ? nativeIncapacitatedReactToInjury : nullptr);
+            }
+        }
+
         void levelLoaded(World& world)
         {
+            applyVanillaFixes();
             resetBots(world);
             applyMatchSpeed(world);
             DeusExState& s = state();

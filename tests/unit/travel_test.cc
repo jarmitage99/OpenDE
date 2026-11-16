@@ -1,9 +1,13 @@
 #include "core/objects.h"
+#include "core/url.h"
 #include "core/vm.h"
+#include "engine/props_engine.h"
 #include "engine/props_extension.h"
 #include "engine/world.h"
 
 #include <catch_amalgamated.hpp>
+
+#include <cmath>
 
 namespace {
     bool boolFlag(dx::UObject* flagBase, const char* name)
@@ -109,4 +113,22 @@ TEST_CASE("the travel string uses the original GetTravelString layout", "[data]"
     std::string keyRingName = block.substr(keyRing + 10 + 9, block.find("\r\n", keyRing + 2) - keyRing - 19);
     CHECK(text.find("Name=" + keyRingName + " Ptr=") != std::string::npos);
     dx::objects::unloadPackage(dx::Name("01_NYC_UNATCOIsland"));
+}
+
+TEST_CASE("travelling through a teleporter from a URL with options arrives at the destination portal", "[data]")
+{
+    dx::engine::initialize(DEUSEX_GAME_DATA);
+    dx::objects::unloadPackage(dx::Name("01_NYC_UNATCOHQ"));
+    {
+        dx::World world;
+        std::string url = dx::travelUrl("01_NYC_UNATCOIsland?Difficulty=1", "01_NYC_UNATCOHQ#Inside_UN_HQ", dx::TRAVEL_Relative);
+        REQUIRE(world.loadMap(url));
+        dx::UObject* player = world.player();
+        REQUIRE(player != nullptr);
+        dx::Vector location = dx::actor::Location(player);
+        CHECK(std::abs(location.x - -1945.5f) < 1.0f);
+        CHECK(std::abs(location.y - 1551.9f) < 1.0f);
+        CHECK(world.urlOption("Difficulty") == "1");
+    }
+    dx::objects::unloadPackage(dx::Name("01_NYC_UNATCOHQ"));
 }

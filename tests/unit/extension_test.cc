@@ -1581,6 +1581,18 @@ TEST_CASE("A forced UI scale overrides the automatic scale even below 600 virtua
     dx::extension::setViewportSize(800, 600);
 }
 
+TEST_CASE("A fractional UI scale sizes the root window with that scale", "[data]")
+{
+    auto* root = static_cast<dx::extension::UWindow*>(makeRoot());
+    dx::extension::setUIScale(1.5f);
+    dx::extension::setViewportSize(1366, 768);
+    layout(1366, 768);
+    CHECK(root->width() == 683.0f);
+    CHECK(root->height() == 512.0f);
+    dx::extension::setUIScale(0);
+    dx::extension::setViewportSize(800, 600);
+}
+
 TEST_CASE("Conversation letterbox bars cover an ultrawide screen while the conversation stays in the 16:9 area", "[data]")
 {
     dx::UObject* root = makeRoot("DeusEx.DeusExRootWindow");
@@ -1652,6 +1664,125 @@ TEST_CASE("Scope view borders drawn by script cover an ultrawide screen around a
         CHECK(drawn(1936, 464, 1424, 512));
         CHECK(drawn(1424, 464, 512, 512));
         dx::extension::setViewportSize(800, 600);
+    }
+    dx::objects::unloadPackage(dx::Name("01_NYC_UNATCOIsland"));
+}
+
+TEST_CASE("Checkbox draws only the declared box size of its texture without scaling", "[data]")
+{
+    dx::UObject* root = makeRoot();
+    dx::UObject* box = newChild(root, "Extension.CheckboxWindow");
+    setPos(box, 100, 50);
+    setSize(box, 80, 20);
+    {
+        dx::vm::Call call(box, dx::Name("SetCheckboxTextures"));
+        call.obj(dx::objects::loadObject("DeusExUI.PersonaCheckBox_Off", nullptr)).obj(dx::objects::loadObject("DeusExUI.PersonaCheckBox_On", nullptr)).f(12).f(12);
+        call.run();
+    }
+    RecordingCanvas canvas(800, 600);
+    dx::extension::render(canvas);
+    const RecordedTile* checkbox = nullptr;
+    for (const RecordedTile& tile : canvas.tiles) {
+        if (tile.texture && tile.texture->name == dx::Name("PersonaCheckBox_Off")) {
+            checkbox = &tile;
+        }
+    }
+    REQUIRE(checkbox != nullptr);
+    CHECK(checkbox->w == 12.0f);
+    CHECK(checkbox->h == 12.0f);
+    CHECK(checkbox->ul == 12.0f);
+    CHECK(checkbox->vl == 12.0f);
+}
+
+TEST_CASE("The edit cursor of an edit window is centered on the mouse position", "[data]")
+{
+    dx::UObject* root = makeRoot("DeusEx.DeusExRootWindow");
+    voidCall(root, "DestroyAllChildren");
+    dx::UObject* modal = newChild(root, "Extension.ModalWindow");
+    {
+        dx::vm::Call call(modal, dx::Name("SetWindowAlignments"));
+        call.byte(3).byte(3);
+        call.run();
+    }
+    dx::UObject* edit = newChild(modal, "DeusEx.DeusExEditWindow");
+    setPos(edit, 50, 150);
+    setSize(edit, 200, 100);
+    layout(800, 600);
+    dx::extension::mouseMove(100, 200);
+    RecordingCanvas canvas(800, 600);
+    dx::extension::render(canvas);
+    const RecordedTile* cursor = nullptr;
+    for (const RecordedTile& tile : canvas.tiles) {
+        if (tile.texture && tile.texture->name == dx::Name("DeusExEditCursor")) {
+            cursor = &tile;
+        }
+    }
+    REQUIRE(cursor != nullptr);
+    CHECK(cursor->x == 69.0f);
+    CHECK(cursor->y == 169.0f);
+}
+
+TEST_CASE("The HUD spans the whole screen width at 1366x768 so the crosshair and aiming reticle share a center", "[data]")
+{
+    initializeEngine();
+    dx::extension::reset();
+    dx::config::system().set("Engine.Engine", "Root", "DeusEx.DeusExRootWindow");
+    dx::objects::unloadPackage(dx::Name("01_NYC_UNATCOIsland"));
+    {
+        dx::World world;
+        REQUIRE(world.loadMap("01_NYC_UNATCOIsland"));
+        dx::UObject* root = dx::extension::rootWindow();
+        REQUIRE(root != nullptr);
+        dx::UObject* hud = *reinterpret_cast<dx::UObject**>(root->propertyAddress(dx::Name("hud")));
+        REQUIRE(hud != nullptr);
+        dx::UObject* augDisplay = *reinterpret_cast<dx::UObject**>(hud->propertyAddress(dx::Name("augDisplay")));
+        REQUIRE(augDisplay != nullptr);
+        dx::extension::setViewportSize(1366, 768);
+        layout(1366, 768);
+        CHECK(dx::cast<dx::extension::UWindow>(hud)->width() == 1366.0f);
+        CHECK(dx::cast<dx::extension::UWindow>(augDisplay)->width() == 1366.0f);
+        dx::extension::setViewportSize(800, 600);
+    }
+    dx::objects::unloadPackage(dx::Name("01_NYC_UNATCOIsland"));
+}
+
+TEST_CASE("Double clicking a key binding row waits for a key instead of binding the release of the click", "[data]")
+{
+    initializeEngine();
+    dx::extension::reset();
+    dx::config::system().set("Engine.Engine", "Root", "DeusEx.DeusExRootWindow");
+    dx::objects::unloadPackage(dx::Name("01_NYC_UNATCOIsland"));
+    {
+        dx::World world;
+        REQUIRE(world.loadMap("01_NYC_UNATCOIsland"));
+        dx::UObject* root = dx::extension::rootWindow();
+        REQUIRE(root != nullptr);
+        dx::UObject* menu = nullptr;
+        {
+            dx::vm::Call call(root, dx::Name("InvokeMenuScreen"));
+            call.obj(dx::objects::findClass("DeusEx.MenuScreenCustomizeKeys"));
+            call.run();
+            menu = *reinterpret_cast<dx::UObject**>(call.returnValue());
+        }
+        REQUIRE(menu != nullptr);
+        layout(800, 600);
+        layout(800, 600);
+        dx::UObject* list = *reinterpret_cast<dx::UObject**>(menu->propertyAddress(dx::Name("lstKeys")));
+        REQUIRE(list != nullptr);
+        float listX = 0;
+        float listY = 0;
+        dx::cast<dx::extension::UWindow>(list)->absolutePosition(listX, listY);
+        dx::extension::UWindow* rootWindow = dx::cast<dx::extension::UWindow>(root);
+        dx::extension::mouseMove(listX - rootWindow->usedX + 20, listY - rootWindow->usedY + 5);
+        dx::extension::mouseButton(dx::IK_LeftMouse, true);
+        dx::extension::mouseButton(dx::IK_LeftMouse, false);
+        dx::extension::mouseButton(dx::IK_LeftMouse, true);
+        CHECK(*reinterpret_cast<uint32_t*>(menu->propertyAddress(dx::Name("bWaitingForInput"))) != 0);
+        dx::extension::mouseButton(dx::IK_LeftMouse, false);
+        CHECK(*reinterpret_cast<uint32_t*>(menu->propertyAddress(dx::Name("bWaitingForInput"))) != 0);
+        dx::extension::mouseButton(dx::IK_LeftMouse, true);
+        dx::extension::mouseButton(dx::IK_LeftMouse, false);
+        CHECK(*reinterpret_cast<uint32_t*>(menu->propertyAddress(dx::Name("bWaitingForInput"))) == 0);
     }
     dx::objects::unloadPackage(dx::Name("01_NYC_UNATCOIsland"));
 }

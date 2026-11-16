@@ -10,6 +10,7 @@ namespace dx {
 
     namespace deusex {
         void levelLoaded(World& world);
+        void applyVanillaFixes();
         bool scriptedPawnTick(World& world, UObject* pawn, float deltaSeconds);
         void tickBots(World& world, float deltaSeconds);
         bool isBot(UObject* pawn);

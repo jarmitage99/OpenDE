@@ -164,6 +164,7 @@ namespace dx::extension {
         double lastClickTime = -1;
         uint8_t lastClickButton = 0;
         UWindow* lastClickWindow = nullptr;
+        UWindow* pressWindow = nullptr;
         int32_t clicks = 0;
     };
 

@@ -46,8 +46,9 @@ namespace dx {
             std::string rest = text;
             size_t hash = rest.find('#');
             if (hash != std::string::npos) {
-                url.portal = rest.substr(hash + 1);
-                rest = rest.substr(0, hash);
+                size_t end = rest.find('?', hash);
+                url.portal = rest.substr(hash + 1, end == std::string::npos ? std::string::npos : end - hash - 1);
+                rest.erase(hash, end == std::string::npos ? std::string::npos : end - hash);
             }
             size_t question = rest.find('?');
             url.map = rest.substr(0, question);

@@ -1,6 +1,7 @@
 #include "core/config.h"
 #include "core/objects.h"
 #include "core/vm.h"
+#include "deusex/deusex.h"
 #include "engine/actor.h"
 #include "engine/console.h"
 #include "engine/input.h"
@@ -13,6 +14,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <memory>
 #include <string>
 
@@ -746,5 +748,79 @@ TEST_CASE("a terrorist that cannot jump walks right up to the edge of a crate wi
     CHECK(location.y == Catch::Approx(-370.9f).margin(1.0f));
     CHECK(location.z == Catch::Approx(-51.6f).margin(1.0f));
     CHECK(dx::actor::Physics(terrorist) == 1);
+    releaseWorld(world, "01_NYC_UNATCOIsland");
+}
+
+TEST_CASE("an incapacitated terrorist flinches when shot but stays down until the effect ends, then goes after the shooter", "[data]")
+{
+    struct Case {
+        const char* damageType;
+        const char* state;
+        const char* loop;
+    };
+
+    for (const Case& test : { Case { "Stunned", "Stunned", "Shocked" }, Case { "TearGas", "RubbingEyes", "RubEyes" } }) {
+        INFO(test.damageType);
+        std::unique_ptr<dx::World> world = freshWorld("01_NYC_UNATCOIsland");
+        dx::UObject* player = world->player();
+        dx::UObject* terrorist = findActor(*world, "Terrorist6");
+        REQUIRE(terrorist != nullptr);
+        auto stepFrames = [&](int frames) {
+            for (int i = 0; i < frames; i++) {
+                dx::actor::LastRenderTime(terrorist) = world->timeSeconds;
+                dx::pawn::Health(player) = 100;
+                tick(*world, 1);
+            }
+        };
+        auto damage = [&](int amount, const dx::Vector& at, const char* type) {
+            dx::vm::Call call(terrorist, dx::Name("TakeDamage"));
+            call.i(amount).obj(player).v(at).v({}).n(dx::Name(type)).run();
+        };
+        stepFrames(30);
+        dx::Vector center = dx::actor::Location(terrorist);
+        damage(2, center, test.damageType);
+        REQUIRE(dx::vm::stateName(terrorist) == dx::Name(test.state));
+        stepFrames(60);
+        float yaw = static_cast<float>(dx::actor::Rotation(terrorist).yaw) * dx::Pi / 32768.0f;
+        float reach = dx::actor::CollisionRadius(terrorist);
+        dx::Vector front = dx::actor::Location(terrorist) + dx::Vector { std::cos(yaw) * reach, std::sin(yaw) * reach, 10.0f };
+        damage(2, front, "Shot");
+        CHECK(dx::vm::stateName(terrorist) == dx::Name(test.state));
+        CHECK(dx::actor::AnimSequence(terrorist) == dx::Name("HitTorso"));
+        stepFrames(45);
+        CHECK(dx::vm::stateName(terrorist) == dx::Name(test.state));
+        CHECK(dx::actor::AnimSequence(terrorist) == dx::Name(test.loop));
+        int framesDown = 105;
+        while (framesDown < 900 && dx::vm::stateName(terrorist) == dx::Name(test.state)) {
+            stepFrames(1);
+            framesDown++;
+        }
+        CHECK(framesDown >= 450);
+        CHECK(framesDown < 900);
+        CHECK(dx::pawn::Enemy(terrorist) == player);
+        CHECK(dx::vm::stateName(terrorist) == dx::Name("Attacking"));
+        releaseWorld(world, "01_NYC_UNATCOIsland");
+    }
+}
+
+TEST_CASE("with vanilla bug fixes off a stunned terrorist attacks as soon as it is shot", "[data]")
+{
+    std::unique_ptr<dx::World> world = freshWorld("01_NYC_UNATCOIsland");
+    std::string section = dx::config::system().get("Engine.Engine", "GameEngine").value_or("DeusEx.DeusExGameEngine");
+    dx::config::system().set(section, "FixVanillaBugs", "False");
+    dx::deusex::applyVanillaFixes();
+    dx::UObject* player = world->player();
+    dx::UObject* terrorist = findActor(*world, "Terrorist6");
+    REQUIRE(terrorist != nullptr);
+    tick(*world, 30);
+    dx::vm::Call stun(terrorist, dx::Name("TakeDamage"));
+    stun.i(2).obj(player).v(dx::actor::Location(terrorist)).v({}).n(dx::Name("Stunned")).run();
+    REQUIRE(dx::vm::stateName(terrorist) == dx::Name("Stunned"));
+    tick(*world, 30);
+    dx::vm::Call shot(terrorist, dx::Name("TakeDamage"));
+    shot.i(2).obj(player).v(dx::actor::Location(terrorist)).v({}).n(dx::Name("Shot")).run();
+    CHECK(dx::vm::stateName(terrorist) == dx::Name("Attacking"));
+    dx::config::system().set(section, "FixVanillaBugs", "True");
+    dx::deusex::applyVanillaFixes();
     releaseWorld(world, "01_NYC_UNATCOIsland");
 }

@@ -182,7 +182,7 @@ namespace dx::extension {
     float virtualScale()
     {
         if (state().uiScale > 0) {
-            return static_cast<float>(state().uiScale);
+            return state().uiScale;
         }
         return std::max(std::floor(fittedHeight() / 600.0f), 1.0f);
     }
@@ -200,7 +200,7 @@ namespace dx::extension {
     float extendedVirtualWidth()
     {
         float realWidth = std::ceil(state().viewportWidth / virtualScale());
-        return std::max(std::min(realWidth, std::ceil(fittedHeight() / virtualScale()) * 16.0f / 9.0f), virtualWidth());
+        return std::max(std::min(realWidth, std::ceil(std::ceil(fittedHeight() / virtualScale()) * 16.0f / 9.0f)), virtualWidth());
     }
 
     bool spansSafeArea(UWindow* window, float absoluteX)
@@ -1676,6 +1676,9 @@ namespace dx::extension {
         if (lastClickWindow == window) {
             lastClickWindow = nullptr;
         }
+        if (pressWindow == window) {
+            pressWindow = nullptr;
+        }
     }
 
     void URootWindow::postDrawWindow(UGC* gc)
@@ -1876,6 +1879,7 @@ namespace dx::extension {
             return isModalOpen();
         }
         if (pressed) {
+            pressWindow = focus;
             if (!focus->sensitive()) {
                 return isModalOpen();
             }
@@ -1913,7 +1917,9 @@ namespace dx::extension {
             }
             return isModalOpen();
         }
-        if (focus->rawMouseButtonPressed(relativeX, relativeY, key, IST_Release)) {
+        bool grabbedSincePress = pressWindow && pressWindow != focus && focus == windowOf(rootwindow::grabbedWindow(this));
+        pressWindow = nullptr;
+        if (!grabbedSincePress && focus->rawMouseButtonPressed(relativeX, relativeY, key, IST_Release)) {
             return true;
         }
         float px = relativeX;
@@ -3758,7 +3764,7 @@ namespace dx::extension {
         state().viewportHeight = height;
     }
 
-    void setUIScale(int scale)
+    void setUIScale(float scale)
     {
         state().uiScale = scale;
     }

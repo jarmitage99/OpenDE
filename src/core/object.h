@@ -189,6 +189,7 @@ namespace dx {
         std::vector<UProperty*> params;
         UProperty* returnParm = nullptr;
         NativeFunction native = nullptr;
+        NativeFunction scriptOverride = nullptr;
         std::vector<uint8_t> stub;
     };
 
