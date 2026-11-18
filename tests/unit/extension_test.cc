@@ -1786,3 +1786,35 @@ TEST_CASE("Double clicking a key binding row waits for a key instead of binding 
     }
     dx::objects::unloadPackage(dx::Name("01_NYC_UNATCOIsland"));
 }
+
+TEST_CASE("HUD crosshair is centered on the weapon reticle center when the scaled HUD has an odd width", "[data]")
+{
+    initializeEngine();
+    dx::extension::reset();
+    dx::config::system().set("Engine.Engine", "Root", "DeusEx.DeusExRootWindow");
+    dx::objects::unloadPackage(dx::Name("01_NYC_UNATCOIsland"));
+    {
+        dx::World world;
+        REQUIRE(world.loadMap("01_NYC_UNATCOIsland"));
+        REQUIRE(dx::extension::rootWindow() != nullptr);
+        dx::extension::setUIScale(2);
+        layout(1366, 768);
+        RecordingCanvas canvas(1366, 768);
+        dx::extension::render(canvas);
+        dx::extension::setUIScale(0);
+        dx::UObject* crossTexture = dx::objects::loadObject("DeusExUI.CrossSquare", nullptr);
+        REQUIRE(crossTexture != nullptr);
+        std::vector<RecordedTile> crosses;
+        for (const RecordedTile& tile : canvas.tiles) {
+            if (tile.texture == crossTexture) {
+                crosses.push_back(tile);
+            }
+        }
+        REQUIRE(crosses.size() == 1);
+        CHECK(crosses[0].x == 664.0f);
+        CHECK(crosses[0].y == 368.0f);
+        CHECK(crosses[0].w == 32.0f);
+        CHECK(crosses[0].h == 32.0f);
+    }
+    dx::objects::unloadPackage(dx::Name("01_NYC_UNATCOIsland"));
+}

@@ -2,6 +2,7 @@
 #include "core/package_writer.h"
 #include "core/vm.h"
 #include "engine/actor.h"
+#include "engine/canvas_hooks.h"
 #include "engine/props_deusex.h"
 #include "engine/props_engine.h"
 #include "engine/props_extension.h"
@@ -179,6 +180,46 @@ TEST_CASE("game directory enumerates save slots with their save info", "[data]")
     quick.i(-1);
     quick.run();
     CHECK(*reinterpret_cast<dx::UObject**>(quick.returnValue()) == nullptr);
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("save info keeps a snapshot of the scene for the load game preview", "[data]")
+{
+    dx::engine::initialize(DEUSEX_GAME_DATA);
+    std::filesystem::path root = freshSaveRoot("dx-savegame-test-snapshot");
+    unloadMaps();
+    dx::canvasHooks().snapshot = [](int width, int height) {
+        std::vector<uint8_t> rgba(static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                uint8_t* pixel = rgba.data() + (static_cast<size_t>(y) * static_cast<size_t>(width) + static_cast<size_t>(x)) * 4;
+                pixel[0] = static_cast<uint8_t>(x);
+                pixel[1] = static_cast<uint8_t>(y);
+                pixel[2] = 200;
+                pixel[3] = 255;
+            }
+        }
+        return rgba;
+    };
+    {
+        dx::World world;
+        REQUIRE(world.loadMap(MapName));
+        REQUIRE(dx::savegame::saveGame(world, 2, "snapshot"));
+        unloadMaps();
+    }
+    dx::canvasHooks().snapshot = nullptr;
+    dx::UObject* info = dx::savegame::readSaveInfo(2);
+    REQUIRE(info != nullptr);
+    dx::UTexture* snapshot = dx::cast<dx::UTexture>(dx::deusexsaveinfo::Snapshot(info));
+    REQUIRE(snapshot != nullptr);
+    REQUIRE(snapshot->width() == 160);
+    REQUIRE(snapshot->height() == 120);
+    std::vector<uint8_t> rgba = snapshot->rgba(0);
+    size_t at = (static_cast<size_t>(37) * 160 + 101) * 4;
+    CHECK(rgba[at + 0] == 101);
+    CHECK(rgba[at + 1] == 37);
+    CHECK(rgba[at + 2] == 200);
+    CHECK(rgba[at + 3] == 255);
     std::filesystem::remove_all(root);
 }
 

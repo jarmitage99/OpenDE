@@ -9,9 +9,11 @@
 #include "engine/props_deusex.h"
 #include "engine/savegame.h"
 #include "engine/world.h"
+#include "extension/windows.h"
 
 #include <algorithm>
 #include <climits>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
@@ -845,6 +847,39 @@ namespace dx {
             }
         }
 
+        UFunction* hudConfigurationChanged = nullptr;
+
+        void nativeHudConfigurationChanged(UObject* self, Frame& stack, void*)
+        {
+            vm::finish(stack);
+            NativeFunction native = hudConfigurationChanged->scriptOverride;
+            hudConfigurationChanged->scriptOverride = nullptr;
+            vm::Call(self, hudConfigurationChanged->name).run();
+            hudConfigurationChanged->scriptOverride = native;
+            extension::UWindow* hud = cast<extension::UWindow>(self);
+            uint8_t* crossAddress = self->propertyAddress(Name("cross"));
+            extension::UWindow* cross = crossAddress ? cast<extension::UWindow>(*reinterpret_cast<UObject**>(crossAddress)) : nullptr;
+            if (!hud || !cross) {
+                return;
+            }
+            float centerX = std::floor(hud->width() * 0.5f) - 1.0f;
+            float centerY = std::floor(hud->height() * 0.5f) - 1.0f;
+            float crossX = centerX - std::floor((cross->width() - 1.0f) * 0.5f);
+            float crossY = centerY - std::floor((cross->height() - 1.0f) * 0.5f);
+            cross->configureChild(crossX, crossY, cross->width(), cross->height());
+        }
+
+        void alignCrosshair()
+        {
+            UClass* hudClass = objects::findClass("DeusEx.DeusExHUD");
+            UFunction* function = hudClass ? hudClass->findFunction(Name("ConfigurationChanged")) : nullptr;
+            if (!function || function->outer != hudClass) {
+                return;
+            }
+            hudConfigurationChanged = function;
+            function->scriptOverride = nativeHudConfigurationChanged;
+        }
+
         void resumeIncapacitatedAnim(UObject* pawn)
         {
             if (!vanillaFixes || !pawn->stateFrame || pawn->stateFrame->latentAction != latent::Sleep || !actor::bAnimFinished(pawn) || actor::bAnimLoop(pawn)) {
@@ -1066,6 +1101,7 @@ namespace dx {
         void levelLoaded(World& world)
         {
             applyVanillaFixes();
+            alignCrosshair();
             resetBots(world);
             applyMatchSpeed(world);
             DeusExState& s = state();

@@ -903,6 +903,9 @@ namespace {
                 SDL_free(text);
                 return result;
             };
+            hooks.snapshot = [this](int width, int height) {
+                return captureScene(width, height);
+            };
             dx::extension::setFrameCanvas(&renderer->canvas());
             dx::extension::setProjector([this](const dx::Vector& location, float& pixelX, float& pixelY) {
                 return project(location, pixelX, pixelY);
@@ -1300,6 +1303,61 @@ namespace {
                 }
             }
             renderer->endFrame();
+        }
+
+        std::vector<uint8_t> captureScene(int width, int height)
+        {
+            dx::Vector location;
+            dx::Rotator rotation;
+            float fov = 90;
+            if (!world || !world->calcView(location, rotation, fov)) {
+                return {};
+            }
+            int frameW = 0;
+            int frameH = 0;
+            SDL_GL_GetDrawableSize(window, &frameW, &frameH);
+            renderer->beginFrame(frameW, frameH);
+            dx::UObject* player = world->player();
+            dx::UObject* viewActor = nullptr;
+            if (player && !dx::pawn::bBehindView(player)) {
+                viewActor = dx::playerpawn::ViewTarget(player) ? dx::playerpawn::ViewTarget(player) : player;
+            }
+            renderer->drawScene(world->level, world->actors, location, rotation, displayFov(fov, frameW, frameH), viewActor);
+            renderer->endFrame();
+            renderer->applyBrightness(static_cast<float>(std::atof(dx::config::system().get(videoSection(), "Brightness").value_or("0.5").c_str())));
+            std::vector<uint8_t> pixels;
+            int shotWidth = 0;
+            int shotHeight = 0;
+            renderer->readPixels(pixels, shotWidth, shotHeight);
+            int cropWidth = std::min(shotWidth, shotHeight * width / height);
+            int cropHeight = std::min(shotHeight, shotWidth * height / width);
+            int left = (shotWidth - cropWidth) / 2;
+            int top = (shotHeight - cropHeight) / 2;
+            std::vector<uint8_t> out(static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
+            for (int y = 0; y < height; y++) {
+                int y0 = top + y * cropHeight / height;
+                int y1 = std::max(top + (y + 1) * cropHeight / height, y0 + 1);
+                for (int x = 0; x < width; x++) {
+                    int x0 = left + x * cropWidth / width;
+                    int x1 = std::max(left + (x + 1) * cropWidth / width, x0 + 1);
+                    uint32_t sum[3] = {};
+                    for (int sy = y0; sy < y1; sy++) {
+                        for (int sx = x0; sx < x1; sx++) {
+                            const uint8_t* pixel = pixels.data() + (static_cast<size_t>(sy) * static_cast<size_t>(shotWidth) + static_cast<size_t>(sx)) * 4;
+                            sum[0] += pixel[0];
+                            sum[1] += pixel[1];
+                            sum[2] += pixel[2];
+                        }
+                    }
+                    uint32_t count = static_cast<uint32_t>((y1 - y0) * (x1 - x0));
+                    uint8_t* target = out.data() + (static_cast<size_t>(y) * static_cast<size_t>(width) + static_cast<size_t>(x)) * 4;
+                    target[0] = static_cast<uint8_t>(sum[0] / count);
+                    target[1] = static_cast<uint8_t>(sum[1] / count);
+                    target[2] = static_cast<uint8_t>(sum[2] / count);
+                    target[3] = 255;
+                }
+            }
+            return out;
         }
 
         void scriptedAction(const std::string& action)

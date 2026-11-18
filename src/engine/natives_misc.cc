@@ -27,6 +27,33 @@ namespace dx {
         return { static_cast<float>(color.r) / 255.0f, static_cast<float>(color.g) / 255.0f, static_cast<float>(color.b) / 255.0f, 1.0f };
     }
 
+    UTexture* snapshotTexture(UObject* outer, Name name, int width, int height)
+    {
+        CanvasHooks& hooks = canvasHooks();
+        if (!hooks.snapshot || width <= 0 || height <= 0) {
+            return nullptr;
+        }
+        std::vector<uint8_t> rgba = hooks.snapshot(width, height);
+        size_t pixels = static_cast<size_t>(width) * static_cast<size_t>(height);
+        if (rgba.size() != pixels * 4) {
+            return nullptr;
+        }
+        UTexture* texture = cast<UTexture>(objects::newObject(objects::findClass("Engine.Texture"), outer, name, RF_Public));
+        *texture->propertyAddress(Name("Format")) = 5;
+        TextureMip mip;
+        mip.width = static_cast<uint32_t>(width);
+        mip.height = static_cast<uint32_t>(height);
+        mip.data.resize(pixels * 4);
+        for (size_t i = 0; i < pixels; i++) {
+            mip.data[i * 4 + 0] = rgba[i * 4 + 2];
+            mip.data[i * 4 + 1] = rgba[i * 4 + 1];
+            mip.data[i * 4 + 2] = rgba[i * 4 + 0];
+            mip.data[i * 4 + 3] = 255;
+        }
+        texture->mips.push_back(std::move(mip));
+        return texture;
+    }
+
     namespace {
         float sinTab(int32_t angle)
         {

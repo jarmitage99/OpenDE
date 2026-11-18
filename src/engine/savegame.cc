@@ -6,6 +6,7 @@
 #include "core/vm.h"
 #include "engine/actor.h"
 #include "engine/ai.h"
+#include "engine/canvas_hooks.h"
 #include "engine/map_writer.h"
 #include "engine/mesh.h"
 #include "engine/props_deusex.h"
@@ -459,8 +460,30 @@ namespace dx {
             deusexsaveinfo::saveCount(info) = deusExPlayer ? deusexplayer::saveCount(player) : 0;
             deusexsaveinfo::saveTime(info) = deusExPlayer ? static_cast<int32_t>(deusexplayer::saveTime(player)) : 0;
             deusexsaveinfo::bCheatsEnabled(info) = player ? playerpawn::bCheatsEnabled(player) : 0;
+            UTexture* snapshot = snapshotTexture(info->outer, Name("Snapshot"), 160, 120);
+            deusexsaveinfo::Snapshot(info) = snapshot;
             PackageWriter infoWriter(Name("SaveInfo"));
             infoWriter.addExport(info, nullptr);
+            if (snapshot) {
+                infoWriter.addExport(snapshot, nullptr);
+            }
+            infoWriter.setNativeSerializer([](PackageWriter& out, UObject* object, Writer& data) {
+                UTexture* texture = cast<UTexture>(object);
+                if (!texture) {
+                    return;
+                }
+                data.index(static_cast<int32_t>(texture->mips.size()));
+                for (const TextureMip& mip : texture->mips) {
+                    size_t skip = out.beginLazyArray(data);
+                    data.index(static_cast<int32_t>(mip.data.size()));
+                    data.bytes(mip.data.data(), mip.data.size());
+                    out.endLazyArray(data, skip);
+                    data.u32(mip.width);
+                    data.u32(mip.height);
+                    data.u8(mip.ubits);
+                    data.u8(mip.vbits);
+                }
+            });
             infoWriter.setFilter([](UObject* object) {
                 return !object->outer || cast<UClass>(object) || (object->linker && !object->linker->savedGame);
             });
@@ -469,6 +492,9 @@ namespace dx {
             });
             bool saved = infoWriter.save(slot / "SaveInfo.dxs", &error);
             objects::destroyObject(info);
+            if (snapshot) {
+                objects::destroyObject(snapshot);
+            }
             if (!saved) {
                 std::fprintf(stderr, "save info failed: %s\n", error.c_str());
                 return false;

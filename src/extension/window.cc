@@ -4,6 +4,7 @@
 #include "core/config.h"
 #include "core/objects.h"
 #include "engine/actor.h"
+#include "engine/canvas_hooks.h"
 #include "engine/input.h"
 #include "engine/props_engine.h"
 #include "engine/resources.h"
@@ -3413,11 +3414,16 @@ namespace dx::extension {
             }
         }
 
-        void nativeGenerateSnapshot(UObject*, Frame& stack, void* result)
+        void nativeGenerateSnapshot(UObject* object, Frame& stack, void* result)
         {
             optionalBoolDefault(stack, false);
             vm::finish(stack);
-            vm::ret<UObject*>(result, nullptr);
+            URootWindow* rootWindow = rootSelf(object);
+            UTexture* texture = nullptr;
+            if (rootWindow) {
+                texture = snapshotTexture(objects::packageObject(Name("Transient")), Name(), rootwindow::snapshotWidth(rootWindow), rootwindow::snapshotHeight(rootWindow));
+            }
+            vm::ret<UObject*>(result, texture);
         }
 
         void nativeIsCurrentModal(UObject* object, Frame& stack, void* result)
