@@ -152,3 +152,47 @@ TEST_CASE("modulated mesh faces ignore vertex lighting so a 50 percent gray skin
     CHECK(std::abs(underGray - background) * 20 < background);
     dx::objects::unloadPackage(dx::Name("01_NYC_UNATCOHQ"));
 }
+
+TEST_CASE("translucent actors in front of lit translucent water are not darkened by the water drawn behind them", "[data]")
+{
+    OffscreenContext gl;
+    REQUIRE(gl.context != nullptr);
+    dx::engine::initialize(DEUSEX_GAME_DATA);
+    dx::objects::unloadPackage(dx::Name("01_NYC_UNATCOIsland"));
+    dx::World world;
+    REQUIRE(world.loadMap("01_NYC_UNATCOIsland"));
+    dx::UClass* sphereClass = dx::objects::findClass("DeusEx.SphereEffect");
+    dx::objects::flushLoads();
+    REQUIRE(sphereClass != nullptr);
+    dx::Vector center { -4761, 10431, -256 };
+    dx::UObject* sphere = world.spawn(sphereClass, nullptr, dx::Name(), center, dx::Rotator {}, nullptr, true);
+    REQUIRE(sphere != nullptr);
+    dx::actor::DrawScale(sphere) = 3.0f;
+    dx::actor::ScaleGlow(sphere) = 1.0f;
+    dx::Vector eye { -4761, 10631, -212 };
+    dx::Rotator rotation = dx::vectorRotation(center - eye);
+
+    dx::SceneRenderer renderer;
+    render(renderer, world, eye, rotation);
+    std::vector<uint8_t> shown = render(renderer, world, eye, rotation);
+    dx::actor::bHidden(sphere) = 1;
+    std::vector<uint8_t> hidden = render(renderer, world, eye, rotation);
+    REQUIRE(shown.size() == hidden.size());
+
+    auto addedInRows = [&](int top, int bottom) {
+        long added = 0;
+        for (int y = top; y < bottom; y++) {
+            for (int x = 280; x < 360; x++) {
+                size_t pixel = static_cast<size_t>(y * frameWidth + x);
+                added += brightness(shown, pixel) - brightness(hidden, pixel);
+            }
+        }
+        return added;
+    };
+    long overDock = addedInRows(204, 210);
+    long overWater = addedInRows(212, 218);
+    INFO("added over dock " << overDock << " added over water " << overWater);
+    REQUIRE(overDock > 1000);
+    CHECK(overWater > overDock);
+    dx::objects::unloadPackage(dx::Name("01_NYC_UNATCOIsland"));
+}

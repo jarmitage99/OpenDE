@@ -1627,7 +1627,7 @@ TEST_CASE("Conversation letterbox bars cover an ultrawide screen while the conve
     dx::extension::setViewportSize(800, 600);
 }
 
-TEST_CASE("Scope view borders drawn by script cover an ultrawide screen around a centered scope", "[data]")
+TEST_CASE("Scope view keeps its 640x480 share of the screen height and its borders cover an ultrawide screen", "[data]")
 {
     initializeEngine();
     dx::extension::reset();
@@ -1658,11 +1658,15 @@ TEST_CASE("Scope view borders drawn by script cover an ultrawide screen around a
             }
             return false;
         };
-        CHECK(drawn(0, 0, 3360, 464));
-        CHECK(drawn(0, 976, 3360, 464));
-        CHECK(drawn(0, 464, 1424, 512));
-        CHECK(drawn(1936, 464, 1424, 512));
-        CHECK(drawn(1424, 464, 512, 512));
+        for (const RecordedTile& tile : canvas.tiles) {
+        }
+        for (const RecordedTile& tile : canvas.tiles) {
+        }
+        CHECK(drawn(0, 0, 3360, 336));
+        CHECK(drawn(0, 1104, 3360, 336));
+        CHECK(drawn(0, 336, 1296, 768));
+        CHECK(drawn(2064, 336, 1296, 768));
+        CHECK(drawn(1296, 336, 768, 768));
         dx::extension::setViewportSize(800, 600);
     }
     dx::objects::unloadPackage(dx::Name("01_NYC_UNATCOIsland"));

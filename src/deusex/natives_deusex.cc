@@ -880,6 +880,54 @@ namespace dx {
             function->scriptOverride = nativeHudConfigurationChanged;
         }
 
+        UFunction* scopeDrawWindow = nullptr;
+
+        void nativeScopeDrawWindow(UObject* self, Frame& stack, void*)
+        {
+            UObject* gcObject = vm::get<UObject*>(stack);
+            vm::finish(stack);
+            extension::UWindow* view = cast<extension::UWindow>(self);
+            extension::UGC* gc = cast<extension::UGC>(gcObject);
+            if (!view || !gc) {
+                return;
+            }
+            float width = view->width();
+            float height = view->height();
+            float scale = std::max(std::min(width / 640.0f, height / 480.0f), 1.0f);
+            float bleedLeft = gc->bleedLeft;
+            float bleedRight = gc->bleedRight;
+            float bleedEdge = gc->bleedEdge;
+            view->width() = width / scale;
+            view->height() = height / scale;
+            gc->drawScale = scale;
+            gc->bleedLeft = bleedLeft / scale;
+            gc->bleedRight = bleedRight / scale;
+            gc->bleedEdge = std::floor(bleedEdge / scale);
+            NativeFunction native = scopeDrawWindow->scriptOverride;
+            scopeDrawWindow->scriptOverride = nullptr;
+            vm::Call call(self, scopeDrawWindow->name);
+            call.obj(gcObject);
+            call.run();
+            scopeDrawWindow->scriptOverride = native;
+            gc->drawScale = 1;
+            gc->bleedLeft = bleedLeft;
+            gc->bleedRight = bleedRight;
+            gc->bleedEdge = bleedEdge;
+            view->width() = width;
+            view->height() = height;
+        }
+
+        void scaleScopeView()
+        {
+            UClass* scopeClass = objects::findClass("DeusEx.DeusExScopeView");
+            UFunction* function = scopeClass ? scopeClass->findFunction(Name("DrawWindow")) : nullptr;
+            if (!function || function->outer != scopeClass) {
+                return;
+            }
+            scopeDrawWindow = function;
+            function->scriptOverride = nativeScopeDrawWindow;
+        }
+
         void resumeIncapacitatedAnim(UObject* pawn)
         {
             if (!vanillaFixes || !pawn->stateFrame || pawn->stateFrame->latentAction != latent::Sleep || !actor::bAnimFinished(pawn) || actor::bAnimLoop(pawn)) {
@@ -1102,6 +1150,7 @@ namespace dx {
         {
             applyVanillaFixes();
             alignCrosshair();
+            scaleScopeView();
             resetBots(world);
             applyMatchSpeed(world);
             DeusExState& s = state();

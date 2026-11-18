@@ -1280,12 +1280,6 @@ namespace dx {
             std::stable_sort(surfaces.begin(), surfaces.end(), [](const TranslucentSurface& a, const TranslucentSurface& b) {
                 return a.order < b.order;
             });
-            for (const TranslucentSurface& surface : surfaces) {
-                drawBatch(*surface.batch, view, &surface.first, &surface.count, 1, surface.node, uploadedLights);
-            }
-            device->setPan(0, 0);
-            device->setScale(1, 1);
-            device->setBlend(BlendMode::Opaque);
             return;
         }
         auto collectRanges = [&](int32_t index) {
@@ -1436,8 +1430,8 @@ namespace dx {
         if (view.recursion == 0) {
             device->applyOcclusion(sceneNearPlane, sceneFarPlane, view.tanHalfWidth, view.tanHalfHeight);
         }
-        flushTranslucent(view);
         drawLevelGeometry(view, true);
+        flushTranslucent(view);
         if (view.clipCount) {
             View plain;
             applyClip(plain);
@@ -1470,8 +1464,8 @@ namespace dx {
         applyClip(plain);
         drawLevelGeometry(sky, false);
         drawActors(actors, sky, viewActor, false);
-        flushTranslucent(sky);
         drawLevelGeometry(sky, true);
+        flushTranslucent(sky);
     }
 
     void SceneRenderer::markMirror(const View& view, const MirrorSurface& mirror)
@@ -2316,10 +2310,32 @@ namespace dx {
             }
             return first.distance > second.distance;
         });
+        std::vector<TranslucentSurface>& surfaces = scratchTranslucentSurfaces;
+        size_t nextSurface = 0;
+        uint32_t uploadedLights = ~0u;
+        auto drawSurfacesBefore = [&](int32_t limit) {
+            bool drew = false;
+            while (nextSurface < surfaces.size() && surfaces[nextSurface].order <= limit) {
+                const TranslucentSurface& surface = surfaces[nextSurface++];
+                drawBatch(*surface.batch, view, &surface.first, &surface.count, 1, surface.node, uploadedLights);
+                device->setPan(0, 0);
+                device->setScale(1, 1);
+                drew = true;
+            }
+            if (drew) {
+                device->setOcclusionSource(OcclusionSource::Mesh);
+            }
+        };
         for (size_t index : order) {
             const TranslucentItem& item = translucentItems[index];
+            drawSurfacesBefore(item.order - 1);
             drawGroup(item.flags, item.texture, item.extra, item.vertices);
+            if (item.extra.lightMask) {
+                uploadedLights = ~0u;
+            }
         }
+        drawSurfacesBefore(std::numeric_limits<int32_t>::max());
+        surfaces.clear();
         translucentCount = 0;
         device->setBlend(BlendMode::Opaque);
     }

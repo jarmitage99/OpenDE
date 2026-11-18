@@ -500,6 +500,14 @@ namespace dx::extension {
             return;
         }
         objects::ensureLoaded(tex);
+        if (drawScale != 1.0f) {
+            float scaledLeft = std::round(offsetX + (destX - offsetX) * drawScale);
+            float scaledTop = std::round(offsetY + (destY - offsetY) * drawScale);
+            destWidth = std::round(offsetX + (destX + destWidth - offsetX) * drawScale) - scaledLeft;
+            destHeight = std::round(offsetY + (destY + destHeight - offsetY) * drawScale) - scaledTop;
+            destX = scaledLeft;
+            destY = scaledTop;
+        }
         float left = destX;
         float top = destY;
         float right = destX + destWidth;

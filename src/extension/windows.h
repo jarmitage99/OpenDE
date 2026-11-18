@@ -551,6 +551,7 @@ namespace dx::extension {
 
         float offsetX = 0;
         float offsetY = 0;
+        float drawScale = 1;
         float bleedLeft = 0;
         float bleedRight = 0;
         float bleedEdge = 0;
