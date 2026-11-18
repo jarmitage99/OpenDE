@@ -12,7 +12,7 @@ concurrency:
 jobs:
   build:
     name: Flatpak x86_64
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container:
       image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08
       options: --privileged
