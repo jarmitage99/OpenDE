@@ -1,0 +1,42 @@
+name: FreeBSD
+on:
+  push: ~
+  pull_request:
+    branches: [master]
+  workflow_call:
+
+concurrency:
+  group: freebsd-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  freebsd:
+    name: FreeBSD (x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build and test
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: "14.3"
+          usesh: true
+          prepare: |
+            pkg install -y cmake ninja pkgconf \
+              libX11 libXext libXrandr libXcursor libXi libXScrnSaver libxkbcommon \
+              mesa-libs libglvnd wayland wayland-protocols libdecor
+          run: |
+            cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSKIP_QA=ON
+            cmake --build build --parallel "$(sysctl -n hw.ncpu)"
+            build/bin/unit-tests "~[data]"
+            mkdir -p dist
+            cp build/bin/deusex build/bin/deused build/bin/ucc dist/
+            ls -lh dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deusex-freebsd-x86_64
+          path: dist/*
+          if-no-files-found: error
