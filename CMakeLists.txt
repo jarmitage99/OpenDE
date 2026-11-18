@@ -74,6 +74,12 @@ add_library(imgui STATIC
 )
 target_include_directories(imgui SYSTEM PUBLIC ${CMAKE_SOURCE_DIR}/vendor/imgui ${CMAKE_SOURCE_DIR}/vendor/imgui/backends)
 target_link_libraries(imgui PUBLIC SDL2::SDL2-static)
+if(UNIX AND NOT APPLE)
+    find_package(X11)
+    if(X11_FOUND)
+        target_include_directories(imgui SYSTEM PRIVATE ${X11_INCLUDE_DIR})
+    endif()
+endif()
 
 # ImGuizmo
 add_library(imguizmo STATIC ${CMAKE_SOURCE_DIR}/vendor/imguizmo/ImGuizmo.cpp)

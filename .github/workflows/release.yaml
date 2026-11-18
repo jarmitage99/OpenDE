@@ -12,9 +12,11 @@ jobs:
     uses: ./.github/workflows/appimage.yaml
   flatpak:
     uses: ./.github/workflows/flatpak.yaml
+  freebsd:
+    uses: ./.github/workflows/freebsd.yaml
 
   release:
-    needs: [linux, windows, appimage, flatpak]
+    needs: [linux, windows, appimage, flatpak, freebsd]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -26,9 +28,10 @@ jobs:
         run: |
           tag="${GITHUB_REF_NAME}"
 
-          chmod +x deusex-linux-ubuntu/* deusex-linux-fedora/*
+          chmod +x deusex-linux-ubuntu/* deusex-linux-fedora/* deusex-freebsd-x86_64/*
           tar -czf "deusex-linux-ubuntu-${tag}.tar.gz" -C deusex-linux-ubuntu .
           tar -czf "deusex-linux-fedora-${tag}.tar.gz" -C deusex-linux-fedora .
+          tar -czf "deusex-freebsd-x86_64-${tag}.tar.gz" -C deusex-freebsd-x86_64 .
           (cd deusex-windows-mingw && zip -r "../deusex-windows-${tag}.zip" .)
           mv deusex-appimage-x86_64/*.AppImage "deusex-${tag}-x86_64.AppImage"
           mv deusex-flatpak-x86_64/*.flatpak "deusex-${tag}.flatpak"
@@ -40,6 +43,7 @@ jobs:
           files: |
             deusex-linux-ubuntu-*.tar.gz
             deusex-linux-fedora-*.tar.gz
+            deusex-freebsd-x86_64-*.tar.gz
             deusex-windows-*.zip
             deusex-*-x86_64.AppImage
             deusex-*.flatpak
