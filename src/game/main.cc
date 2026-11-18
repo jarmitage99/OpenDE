@@ -1689,6 +1689,7 @@ int main(int argc, char** argv)
         }
     } catch (const std::exception& error) {
         std::fprintf(stderr, "error: %s\n", error.what());
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Deus Ex", error.what(), window);
         result = 1;
     }
     dx::audio::shutdown();

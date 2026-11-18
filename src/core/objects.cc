@@ -747,7 +747,7 @@ namespace dx {
             reg.bootstrapping = true;
             Linker* core = loadPackage(Name("Core"));
             if (!core) {
-                throw std::runtime_error("Core package not found");
+                throw std::runtime_error("Core package not found. Copy the Deus Ex game files into a game-data directory next to the executable, or set DEUSEX_GAME_DATA to their location.");
             }
             UClass* object = cast<UClass>(core->object(core->findExport(Name("Object"), Name("Class"), "")));
             ensureLoaded(object);
