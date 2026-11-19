@@ -177,7 +177,6 @@
         <main>
             <header>
                 <h1>OpenDE</h1>
-                <p>An open-source reimplementation of the Deus Ex engine</p>
             </header>
             <div id=game>
                 <div id=screen><canvas height=600 id=canvas oncontextmenu=event.preventDefault() tabindex=-1
@@ -187,8 +186,8 @@
                     </div>
                 </div>
                 <fieldset disabled id=game-shortcuts aria-label="Game shortcuts">
-                    <button type=button data-key=KeyX id=shortcut-crouch aria-pressed=false>Crouch toggle</button>
-                    <button type=button data-key=KeyF>Next weapon</button>
+                    <button type=button data-key=KeyX id=shortcut-crouch aria-pressed=false>Crouch</button>
+                    <button type=button data-key=KeyF>Next Item</button>
                     <button type=button data-key=KeyZ>Zoom</button>
                     <button type=button data-key=KeyR>Reload</button>
                     <button type=button data-key=Tab>Items</button>
@@ -197,6 +196,8 @@
             </div>
             <div class=toolbar><span>Click the game window to capture the mouse.</span></div>
             <section>
+                <h1>OpenDE</h1>
+                <p>An open-source reimplementation of the Deus Ex engine</p>
                 <h2>About</h2>
                 <p>OpenDE runs UnrealScript bytecode from the shipped packages. This page is the same engine compiled to
                     WebAssembly with Emscripten, using WebGL 2. It runs the shareware Deus Ex demo</p>
