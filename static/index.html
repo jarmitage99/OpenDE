@@ -3,7 +3,7 @@
 
     <head>
         <meta charset=utf-8>
-        <meta content="width=device-width,initial-scale=1" name=viewport>
+        <meta content="width=device-width,initial-scale=1,viewport-fit=cover" name=viewport>
         <title>OpenDE Demo</title>
         <style>
             :root {
@@ -24,30 +24,15 @@
                 font-size: 15px
             }
 
+            body {
+                padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+                    env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+                display: flow-root;
+            }
+
             main {
                 width: min(802px, calc(100% - 24px));
                 margin: 24px auto
-            }
-
-            header {
-                padding-right: 128px;
-            }
-
-            #fullscreen {
-                position: fixed;
-                top: 12px;
-                right: 12px;
-                z-index: 10;
-            }
-
-            header h1 {
-                margin: 0;
-                font-size: 24px
-            }
-
-            header p {
-                margin: 4px 0 16px;
-                color: var(--muted)
             }
 
             a {
@@ -171,6 +156,11 @@
                 font-size: 17px
             }
             #screen:fullscreen {
+                --safe-width: calc(100vw - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+                --safe-height: calc(100vh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+                box-sizing: border-box;
+                padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+                    env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
                 width: 100% !important;
                 height: 100% !important;
                 border: 0;
@@ -181,18 +171,14 @@
             }
 
             #screen:fullscreen #canvas {
-                width: min(100vw, calc(100vh * var(--render-width, 800) / var(--render-height, 600))) !important;
-                height: min(100vh, calc(100vw * var(--render-height, 600) / var(--render-width, 800))) !important;
+                width: min(var(--safe-width), calc(var(--safe-height) * var(--render-width, 800) / var(--render-height, 600))) !important;
+                height: min(var(--safe-height), calc(var(--safe-width) * var(--render-height, 600) / var(--render-width, 800))) !important;
             }
         </style>
     </head>
 
     <body>
-        <button disabled id=fullscreen>Fullscreen</button>
         <main>
-            <header>
-                <h1>OpenDE</h1>
-            </header>
             <div id=game>
                 <div id=screen><canvas height=600 id=canvas oncontextmenu=event.preventDefault() tabindex=-1
                         width=800></canvas>
@@ -201,7 +187,7 @@
                     </div>
                 </div>
                 <fieldset disabled id=game-shortcuts aria-label="Game shortcuts">
-                    <label><input type=checkbox id=touch-laptop checked>Web/Classic</label>
+                    <label><input type=checkbox id=touch-laptop checked>Web Controls</label>
                     <button type=button data-mouse=2>Activate <span class=shortcut-hint data-web="touch-hold" data-classic="Right-click">(touch-hold)</span></button>
                     <button type=button class=item-control data-key=KeyZ>Zoom <span class=shortcut-hint data-web="Z" data-classic="[">(Z)</span></button>
                     <button type=button class=item-control data-key=KeyR>Reload <span class=shortcut-hint data-web="R" data-classic=";">(R)</span></button>
@@ -209,11 +195,11 @@
                     <button type=button class=item-control data-action=jump-forward>Jump+Fwd <span class=shortcut-hint>(W + Space)</span></button>
                     <button type=button class=item-control data-key=End>Recenter <span class=shortcut-hint data-web="End" data-classic="End">(End)</span></button>
                     <button type=button class=item-control data-key=KeyX id=shortcut-crouch aria-pressed=false>Crouch <span class=shortcut-hint>(X)</span></button>
-                    <button type=button data-key=Tab>Items <span class=shortcut-hint data-web="Tab" data-classic="I">(Tab)</span></button>
-                    <button type=button data-key=Escape>Menu <span class=shortcut-hint>(Esc)</span></button>
+                    <button type=button class=item-control disabled id=fullscreen>Fullscreen</button>
+                    <button type=button class=item-control data-key=Escape>Menu <span class=shortcut-hint>(Esc)</span></button>
+                    <button type=button class=item-control data-key=Tab>Items <span class=shortcut-hint data-web="Tab" data-classic="I">(Tab)</span></button>
                 </fieldset>
             </div>
-            <div class=toolbar><span>Click the game window to capture the mouse.</span></div>
             <section>
                 <h1>OpenDE</h1>
                 <p>An open-source reimplementation of the Deus Ex engine</p>
@@ -223,7 +209,7 @@
                 <p>Report any issues on the repo: <a
                         href=https://github.com/jarmitage99/OpenDE>github.com/jarmitage99/OpenDE</a></p>
                 <h2>Controls</h2>
-                <p>WASD to move, LMB to fire, RMB to use. ESC opens the main menu. Checked Web/Classic enables web controls; uncheck it for the original demo bindings.</p>
+                <p>WASD to move, LMB to fire, RMB to use. ESC opens the main menu. Checked Web Controls enables web controls; uncheck it for the original demo bindings.</p>
                 <p>Classic: [ to zoom, ; to reload, I for inventory, X to hold crouch, F or End to recenter, Backspace to equip/unequip, Tab to drop, and the mouse wheel to cycle items. C/Z turn and R/V look up/down.</p>
                 <p>In Web mode, scroll up to walk backward; scroll down to walk forward. Keep scrolling to keep moving.</p>
                 <p>Scroll left to turn right; scroll right to turn left. Turning is slower. Scroll diagonally to move and turn at the same time.</p>
@@ -267,26 +253,19 @@
                 if (document.fullscreenElement) return;
                 const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
                 const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
-                const availableWidth = Math.max(0, viewportWidth - 26);
+                const bodyStyle = getComputedStyle(document.body);
+                const availableWidth = Math.max(0, viewportWidth - 26 - parseFloat(bodyStyle.paddingLeft) - parseFloat(bodyStyle.paddingRight));
                 const maxWidth = Math.min(renderWidth, availableWidth);
-                let displayWidth = maxWidth;
-                // Start from the full available width, so an old wrapped header cannot cap growth.
-                // Recheck after wrapping until both the heading and canvas fit vertically.
-                while (true) {
-                    mainElement.style.width = `${displayWidth + 2}px`;
-                    const top = screenElement.getBoundingClientRect().top + window.scrollY;
-                    const availableHeight = Math.max(0, viewportHeight - top - 14);
-                    const nextWidth = Math.min(maxWidth, availableHeight * renderWidth / renderHeight);
-                    if (nextWidth >= displayWidth) break;
-                    displayWidth = nextWidth;
-                }
+                const top = screenElement.getBoundingClientRect().top + window.scrollY;
+                const availableHeight = Math.max(0, viewportHeight - top - 14 - parseFloat(bodyStyle.paddingBottom));
+                const displayWidth = Math.min(maxWidth, availableHeight * renderWidth / renderHeight);
+                mainElement.style.width = `${displayWidth + 2}px`;
                 screenElement.style.width = `${displayWidth}px`;
                 screenElement.style.height = `${displayWidth * renderHeight / renderWidth}px`;
             }
             window.addEventListener("resize", fitScreen);
             document.addEventListener("fullscreenchange", fitScreen);
             window.visualViewport?.addEventListener("resize", fitScreen);
-            new ResizeObserver(fitScreen).observe(document.querySelector("header"));
             new MutationObserver(fitScreen).observe(gameCanvas, { attributes: true, attributeFilter: ["width", "height"] });
             // SDL initializes from the canvas CSS size. Give it the native size before main().
             const previousRuntimeInitializedForScreen = Module.onRuntimeInitialized;
