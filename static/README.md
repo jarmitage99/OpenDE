@@ -36,7 +36,7 @@ In a local headless Chrome comparison on Liberty Island with ANGLE Metal, vertex
 
 - Drag one finger right away to walk and turn. Hold still for 350 ms to send one right-click, then drag to look around. With two fingers, use the left finger to move and strafe and the right finger to look.
 - A single tap left-clicks after a 250 ms double-tap window. Double-tap holds W and Space together for 250 ms to jump forward.
-- The shortcut panel is available with touch or mouse and stays below the game in fullscreen. It includes Crouch toggle, Next weapon, Zoom, Reload, Items, and Menu. Items opens and closes Inventory.
+- The shortcut panel is available with touch or mouse below the game in normal view. Fullscreen shows only the game area, without the shortcut panel. It includes Crouch toggle, Next weapon, Zoom, Reload, Items, and Menu. Items opens and closes Inventory.
 - Touch releases browser pointer lock and suppresses further capture requests while playing by touch. A mouse click on the game can restore capture.
 
 ## Touchpad and mouse changes

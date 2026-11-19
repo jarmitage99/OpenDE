@@ -145,29 +145,19 @@
             section h2 {
                 font-size: 17px
             }
-            #game:fullscreen {
-                display: grid;
-                grid-template-rows: minmax(0, 1fr) auto;
+            #screen:fullscreen {
+                width: 100% !important;
+                height: 100% !important;
+                border: 0;
+                display: flex;
+                align-items: center;
+                justify-content: center;
                 background: #000;
             }
 
-            #game:fullscreen #screen {
-                width: auto !important;
-                height: auto !important;
-                border: 0;
-                display: grid;
-                place-items: center;
-                container-type: size;
-            }
-
-            #game:fullscreen #canvas {
-                width: min(100cqw, calc(100cqh * var(--render-width, 800) / var(--render-height, 600))) !important;
-                height: min(100cqh, calc(100cqw * var(--render-height, 600) / var(--render-width, 800))) !important;
-            }
-
-            #game:fullscreen #game-shortcuts {
-                width: min(480px, calc(100% - 16px));
-                justify-self: center;
+            #screen:fullscreen #canvas {
+                width: min(100vw, calc(100vh * var(--render-width, 800) / var(--render-height, 600))) !important;
+                height: min(100vh, calc(100vw * var(--render-height, 600) / var(--render-width, 800))) !important;
             }
         </style>
     </head>
@@ -282,14 +272,10 @@
                 fitScreen();
             });
             fitScreen();
-            // Fullscreen requests from the game must include the shortcuts too.
-            if (gameElement.requestFullscreen) {
-                gameCanvas.requestFullscreen = options => gameElement.requestFullscreen(options);
-            }
             fullscreenButton.addEventListener("click", event => {
                 // The page sizes the game area within its fullscreen container.
                 event.stopImmediatePropagation();
-                gameElement.requestFullscreen().catch(error => console.error("Fullscreen failed", error));
+                screenElement.requestFullscreen().catch(error => console.error("Fullscreen failed", error));
             }, true);
         </script>
         <script src="controls.js?v=20261118-5"></script>
