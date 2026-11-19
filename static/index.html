@@ -1,0 +1,300 @@
+<!doctypehtml>
+    <html lang=en>
+
+    <head>
+        <meta charset=utf-8>
+        <meta content="width=device-width,initial-scale=1,viewport-fit=cover" name=viewport>
+        <title>OpenDE Demo</title>
+        <link rel=preconnect href="https://storage.googleapis.com" crossorigin>
+        <script src="data-source.js"></script>
+        <style>
+            :root {
+                --background: #1a1a1a;
+                --panel: #555858;
+                --border: #969999;
+                --text: #d9d9d9;
+                --muted: #6e7672;
+                --accent: #58b3d7
+            }
+
+            body,
+            html {
+                margin: 0;
+                background: var(--background);
+                color: var(--text);
+                font-family: sans-serif;
+                font-size: 15px
+            }
+
+            body {
+                padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+                    env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+                display: flow-root;
+            }
+
+            main {
+                width: min(802px, calc(100% - 24px));
+                margin: 24px auto
+            }
+
+            a {
+                color: var(--accent)
+            }
+
+            #screen {
+                position: relative;
+                width: 800px;
+                height: 600px;
+                background: #000;
+                border: 1px solid var(--border)
+            }
+
+            #canvas {
+                display: block;
+                width: 100% !important;
+                height: 100% !important;
+                outline: 0;
+                touch-action: none;
+                -webkit-touch-callout: none;
+                user-select: none
+            }
+
+            #status {
+                position: absolute;
+                left: 50%;
+                top: 50%;
+                transform: translate(-50%, -50%);
+                width: min(480px, 90%);
+                text-align: center
+            }
+
+            #progress {
+                width: 100%;
+                margin-top: 12px
+            }
+
+            .toolbar {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                margin: 12px 0;
+                color: var(--muted)
+            }
+
+            @media (hover: none) and (pointer: coarse) {
+                .toolbar {
+                    display: none
+                }
+            }
+
+            button {
+                padding: 6px 16px;
+                font: inherit;
+                color: var(--text);
+                background: var(--panel);
+                border: 1px solid var(--border);
+                border-radius: 8px;
+                cursor: pointer
+            }
+
+            button:disabled {
+                cursor: default;
+                opacity: .5
+            }
+
+            #game-shortcuts {
+                display: grid;
+                grid-template-columns: repeat(6, minmax(0, 1fr));
+                gap: 8px;
+                min-inline-size: 0;
+                margin: 8px 0;
+                padding: 0;
+                border: 0;
+            }
+
+            #game-shortcuts > * {
+                grid-column: span 3;
+                min-width: 0;
+            }
+
+            #game-shortcuts .item-control {
+                grid-column: span 2;
+                padding-inline: 8px;
+                overflow-wrap: anywhere;
+            }
+
+            #game-shortcuts button {
+                min-height: 44px;
+                touch-action: manipulation;
+            }
+
+            #game-shortcuts .shortcut-hint {
+                font-size: .8em;
+                opacity: .8;
+            }
+
+            #game-shortcuts label {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 8px;
+                min-height: 44px;
+                cursor: pointer;
+            }
+
+            #game-shortcuts button[aria-pressed="true"] {
+                border-color: var(--accent);
+                background: #244653;
+            }
+
+            section {
+                padding: 4px 20px;
+                background: var(--panel);
+                border: 1px solid var(--border);
+                border-radius: 8px
+            }
+
+            section h2 {
+                font-size: 17px
+            }
+            #screen:fullscreen {
+                --safe-width: calc(100vw - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+                --safe-height: calc(100vh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+                box-sizing: border-box;
+                padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+                    env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+                width: 100% !important;
+                height: 100% !important;
+                border: 0;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: #000;
+            }
+
+            #screen:fullscreen #canvas {
+                width: min(var(--safe-width), calc(var(--safe-height) * var(--render-width, 800) / var(--render-height, 600))) !important;
+                height: min(var(--safe-height), calc(var(--safe-width) * var(--render-height, 600) / var(--render-width, 800))) !important;
+            }
+        </style>
+    </head>
+
+    <body>
+        <main>
+            <div id=game>
+                <div id=screen><canvas height=600 id=canvas oncontextmenu=event.preventDefault() tabindex=-1
+                        width=800></canvas>
+                    <div id=status>
+                        <div id=message>Loading</div><progress id=progress max=1 value=0></progress>
+                    </div>
+                </div>
+                <fieldset disabled id=game-shortcuts aria-label="Game shortcuts">
+                    <label><input type=checkbox id=touch-laptop checked>Web Controls</label>
+                    <button type=button data-mouse=2>Activate <span class=shortcut-hint data-web="touch-hold" data-classic="Right-click">(touch-hold)</span></button>
+                    <button type=button class=item-control data-key=KeyZ>Zoom <span class=shortcut-hint data-web="Z" data-classic="[">(Z)</span></button>
+                    <button type=button class=item-control data-key=KeyR>Reload <span class=shortcut-hint data-web="R" data-classic=";">(R)</span></button>
+                    <button type=button class=item-control data-key=KeyF>Next Item <span class=shortcut-hint data-web="F" data-classic="wheel down">(F)</span></button>
+                    <button type=button class=item-control data-action=jump-forward>Jump+Fwd <span class=shortcut-hint>(W + Space)</span></button>
+                    <button type=button class=item-control data-key=End>Recenter <span class=shortcut-hint data-web="End" data-classic="End">(End)</span></button>
+                    <button type=button class=item-control data-key=KeyX id=shortcut-crouch aria-pressed=false>Crouch <span class=shortcut-hint>(X)</span></button>
+                    <button type=button class=item-control disabled id=fullscreen>Fullscreen</button>
+                    <button type=button class=item-control data-key=Escape>Menu <span class=shortcut-hint>(Esc)</span></button>
+                    <button type=button class=item-control data-key=Tab>Items <span class=shortcut-hint data-web="Tab" data-classic="I">(Tab)</span></button>
+                </fieldset>
+            </div>
+            <section>
+                <h1>OpenDE</h1>
+                <p>An open-source reimplementation of the Deus Ex engine</p>
+                <h2>About</h2>
+                <p>OpenDE runs UnrealScript bytecode from the shipped packages. This page is the same engine compiled to
+                    WebAssembly with Emscripten, using WebGL 2. It runs the shareware Deus Ex demo</p>
+                <p>Report any issues on the repo: <a
+                        href=https://github.com/jarmitage99/OpenDE>github.com/jarmitage99/OpenDE</a></p>
+                <h2>Controls</h2>
+                <p>WASD to move, LMB to fire, RMB to use. ESC opens the main menu. Checked Web Controls enables web controls; uncheck it for the original demo bindings.</p>
+                <p>Classic: [ to zoom, ; to reload, I for inventory, X to hold crouch, F or End to recenter, Backspace to equip/unequip, Tab to drop, and the mouse wheel to cycle items. C/Z turn and R/V look up/down.</p>
+                <p>In Web mode, scroll up to walk backward; scroll down to walk forward. Keep scrolling to keep moving.</p>
+                <p>Scroll left to turn right; scroll right to turn left. Turning is slower. Scroll diagonally to move and turn at the same time.</p>
+                <p>In Web mode, hold C to crouch, X to toggle crouch, T to throw/drop, Y to equip/unequip your weapon, F/V for next/previous weapon/item, R to reload, Z to zoom.</p>
+                <p>On touchscreens, drag one finger right away to move or turn. Hold still to use, then drag to look around. With two fingers, drag the left finger to move or strafe and the right finger to look. Tap to fire or select, or double-tap to recenter the view.</p>
+                <p>Settings and saved games are kept in browser storage.</p>
+            </section>
+        </main>
+        <script>var statusElement = document.getElementById("status"), messageElement = document.getElementById("message"), progressElement = document.getElementById("progress"), fullscreenButton = document.getElementById("fullscreen"), userRoot = "/home/web_user/.local/share"; function persist() { FS.syncfs(!1, function (e) { e && console.error("save sync failed", e) }) } var Module = { canvas: document.getElementById("canvas"), arguments: ["--width", "800", "--height", "600"], preRun: [function () { FS.mkdirTree(userRoot), FS.mount(IDBFS, {}, userRoot), addRunDependency("idbfs"), FS.syncfs(!0, function (e) { e && console.error("load sync failed", e), removeRunDependency("idbfs") }) }], postRun: [function () { fullscreenButton.disabled = !1 }], setStatus: function (e) { var t = e.match(/\((\d+(?:\.\d+)?)\/(\d+)\)/); t ? (progressElement.value = parseInt(t[1], 10) / parseInt(t[2], 10), messageElement.textContent = "Downloading game data " + Math.round(100 * progressElement.value) + "%") : e ? messageElement.textContent = e : statusElement.style.display = "none" }, onAbort: function (e) { statusElement.style.display = "block", messageElement.textContent = "Error: " + e } }; Module.canvas.addEventListener("click", function () { Module.canvas.focus() })</script>
+        <script>
+            // The generated Emscripten loader uses index.* in the standalone build.
+            Module.locateFile = (name, prefix) => {
+                if (name === "index.wasm") return prefix + "deusex.wasm";
+                if (name === "index.data" || name === "deusex.data") {
+                    OpenDEDataSource.loaderStarted = true;
+                    return OpenDEDataSource.url;
+                }
+                return prefix + name;
+            };
+            var startLevel = new URLSearchParams(window.location.search).get("level");
+            var startMaps = {
+                training: "00_Training",
+                training_combat: "00_TrainingCombat",
+                training_final: "00_TrainingFinal",
+                game: "01_NYC_UNATCOIsland",
+                unatco_hq: "01_NYC_UNATCOHQ"
+            };
+            if (Object.prototype.hasOwnProperty.call(startMaps, startLevel)) {
+                Module.arguments.push(startMaps[startLevel]);
+            }
+        </script>
+        <script>
+            // Resize the presentation only. Canvas width/height remain owned by the game.
+            const gameElement = document.getElementById("game");
+            const mainElement = gameElement.closest("main");
+            const screenElement = document.getElementById("screen");
+            const gameCanvas = document.getElementById("canvas");
+            function fitScreen() {
+                const renderWidth = gameCanvas.width;
+                const renderHeight = gameCanvas.height;
+                if (!renderWidth || !renderHeight) return;
+                screenElement.style.setProperty("--render-width", renderWidth);
+                screenElement.style.setProperty("--render-height", renderHeight);
+                if (document.fullscreenElement) return;
+                const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
+                const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+                const bodyStyle = getComputedStyle(document.body);
+                const availableWidth = Math.max(0, viewportWidth - 26 - parseFloat(bodyStyle.paddingLeft) - parseFloat(bodyStyle.paddingRight));
+                const maxWidth = Math.min(renderWidth, availableWidth);
+                const top = screenElement.getBoundingClientRect().top + window.scrollY;
+                const availableHeight = Math.max(0, viewportHeight - top - 14 - parseFloat(bodyStyle.paddingBottom));
+                const displayWidth = Math.min(maxWidth, availableHeight * renderWidth / renderHeight);
+                mainElement.style.width = `${displayWidth + 2}px`;
+                screenElement.style.width = `${displayWidth}px`;
+                screenElement.style.height = `${displayWidth * renderHeight / renderWidth}px`;
+            }
+            window.addEventListener("resize", fitScreen);
+            document.addEventListener("fullscreenchange", fitScreen);
+            window.visualViewport?.addEventListener("resize", fitScreen);
+            new MutationObserver(fitScreen).observe(gameCanvas, { attributes: true, attributeFilter: ["width", "height"] });
+            // SDL initializes from the canvas CSS size. Give it the native size before main().
+            const previousRuntimeInitializedForScreen = Module.onRuntimeInitialized;
+            Module.onRuntimeInitialized = () => {
+                screenElement.style.width = "800px";
+                screenElement.style.height = "600px";
+                previousRuntimeInitializedForScreen?.();
+            };
+            Module.postRun.push(() => {
+                // SDL's window-resize callback otherwise copies CSS dimensions into the
+                // rendering buffer. This page owns display scaling; the game owns resolution.
+                JSEvents.removeAllHandlersOnTarget(window, "resize");
+                fitScreen();
+            });
+            fitScreen();
+            fullscreenButton.addEventListener("click", event => {
+                // The page sizes the game area within its fullscreen container.
+                event.stopImmediatePropagation();
+                screenElement.requestFullscreen().catch(error => console.error("Fullscreen failed", error));
+            }, true);
+        </script>
+        <script src="controls.js?v=20261118-13"></script>
+        <script src=lifecycle.js></script>
+        <script async src=deusex.js></script>
+    </body>
+
+    </html>

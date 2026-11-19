@@ -9,6 +9,12 @@
 namespace dx {
     class UTexture;
 
+#ifdef __EMSCRIPTEN__
+    constexpr uint32_t DynamicTextureUpdatePeriod = 10;
+#else
+    constexpr uint32_t DynamicTextureUpdatePeriod = 1;
+#endif
+
     struct GLVertex {
         float x = 0;
         float y = 0;
@@ -28,6 +34,13 @@ namespace dx {
         float fogG = 0;
         float fogB = 0;
     };
+
+#ifdef __EMSCRIPTEN__
+    struct VertexRange {
+        uint32_t vao;
+        int32_t first;
+    };
+#endif
 
     struct DynamicLight {
         Vector location;
@@ -136,6 +149,11 @@ namespace dx {
         virtual void draw(const std::vector<GLVertex>& vertices, Primitive primitive) = 0;
         virtual void upload(const std::vector<GLVertex>& vertices) = 0;
         virtual void drawRange(int32_t first, int32_t count) = 0;
+#ifdef __EMSCRIPTEN__
+        virtual void beginVertexFrame() = 0;
+        virtual VertexRange uploadVertexBatch(const std::vector<GLVertex>& vertices) = 0;
+        virtual void endVertexFrame() = 0;
+#endif
         virtual uint32_t createStatic(const std::vector<GLVertex>& vertices) = 0;
         virtual void deleteStatic(uint32_t geometry) = 0;
         virtual void bindStatic(uint32_t geometry) = 0;

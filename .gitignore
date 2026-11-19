@@ -35,4 +35,6 @@ CMakeUserPresets.json
 *.out
 *.app
 *.dwo
+*.DS_Store
 .env
+

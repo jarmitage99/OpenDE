@@ -2,9 +2,37 @@
 
 An open-source reimplementation of the Deus Ex engine and UnrealEd. It runs
 the original game's UnrealScript bytecode from the shipped `.u` packages on a
-new C++ engine built on SDL2 and OpenGL 3.3.
+new C++ engine built on SDL2 and OpenGL 3.3. 
+This [OpenDE-Web](https://leweyg.github.io/OpenDE-Web/) code [fork](https://github.com/leweyg/OpenDE-Web) optimizes the web rendering
+ and controls (for smoother frame-rate and modern laptop touchpad+keyboard, and phone/tablet single/dual touch-sticks controls, etc.), and was adapted by [Lewey Geselowitz](https://lewcid.com/lg/aboutme.html) based on the core [OpenDE](https://github.com/jarmitage99/OpenDE) project.
 
 The original game data is required and is not included.
+
+## Web Demo Levels
+
+[Main Menu](https://leweyg.github.io/OpenDE-Web/static/index.html)
+
+<a href="https://leweyg.github.io/OpenDE-Web/static/index.html"><img src="static/screenshots/main-menu.jpg" alt="Main Menu screenshot" width="300"></a>
+
+[0_0: Training: Basics](https://leweyg.github.io/OpenDE-Web/static/index.html?level=training)
+
+<a href="https://leweyg.github.io/OpenDE-Web/static/index.html?level=training"><img src="static/screenshots/training.jpg" alt="0_0: Training: Basics screenshot" width="300"></a>
+
+[0_1: Training: Combat](https://leweyg.github.io/OpenDE-Web/static/index.html?level=training_combat)
+
+<a href="https://leweyg.github.io/OpenDE-Web/static/index.html?level=training_combat"><img src="static/screenshots/training_combat.jpg" alt="0_1: Training: Combat screenshot" width="300"></a>
+
+[0_2: Training: Stealth](https://leweyg.github.io/OpenDE-Web/static/index.html?level=training_final)
+
+<a href="https://leweyg.github.io/OpenDE-Web/static/index.html?level=training_final"><img src="static/screenshots/training_final.jpg" alt="0_2: Training: Stealth screenshot" width="300"></a>
+
+[1_0: New York City: Liberty Island](https://leweyg.github.io/OpenDE-Web/static/index.html?level=game)
+
+<a href="https://leweyg.github.io/OpenDE-Web/static/index.html?level=game"><img src="static/screenshots/game.jpg" alt="1_0: New York City: Liberty Island screenshot" width="300"></a>
+
+[1_1: New York City: UNATCO Headquarters](https://leweyg.github.io/OpenDE-Web/static/index.html?level=unatco_hq)
+
+<a href="https://leweyg.github.io/OpenDE-Web/static/index.html?level=unatco_hq"><img src="static/screenshots/unatco_hq.jpg" alt="1_1: New York City: UNATCO Headquarters screenshot" width="300"></a>
 
 ## Features
 
@@ -72,6 +100,59 @@ packaged into `index.data`, without the Windows binaries:
 Then open `http://localhost:8000/`. The game data is LZ4 compressed
 and cached in IndexedDB after the first download, together with settings
 and saved games.
+
+To provision a temporary Google Cloud build VM and upload this checkout:
+
+```sh
+./build_web.sh --project YOUR_PROJECT --vm opende-build --create --prepare-only
+```
+
+The defaults are Ubuntu 24.04 in `us-west1-a`, 16 vCPUs, 64 GB RAM, a 100 GB
+boot disk, and automatic deletion after 24 hours. The script installs Emscripten
+6.0.12 and build tools, then keeps source snapshots under
+`~/build/OpenDE-Web/run.*/source`. It includes vendored dependencies and `static/`,
+but excludes Git metadata, local build outputs, caches, and local credential
+directories. Game data is uploaded separately when supplied.
+
+If this checkout contains `static/deusex.data` and its matching `static/deusex.js`,
+no separate game-data download is needed. The script verifies the package's
+SHA-256, reads its LZ4 chunk tables and file ranges from the loader, and exports
+the assets into the VM workspace's `game-data/` directory before building.
+`static/scripts/unpack-web-data.py` performs this step without executing the loader;
+it uses `python3-lz4`, which the VM setup installs. The older
+`static/source-manifest.json` is informational, not the current chunk schema.
+
+Build on that VM and download the verified browser bundle:
+
+```sh
+./build_web.sh --project YOUR_PROJECT --vm opende-build --game-data /path/to/demo-data
+```
+
+Omit `--game-data` to use the bundled static assets or a local data directory.
+If those local assets have been removed, use
+`--remote-game-data /home/USER/build/OpenDE-Web/run.PREVIOUS/game-data`
+to copy an earlier VM workspace's exported assets into the new workspace.
+
+`--game-data` is a local directory containing `System`, `Maps`, `Textures`,
+`Sounds`, and `Music`; by default the script looks for `demo-data/` or `game-data/`
+in this checkout. Each invocation uploads a fresh source snapshot. Successful
+builds download to `build-web-local/`, verify SHA-256 checksums, and update the
+matching `static/deusex.js` and `static/deusex.wasm` files. Both browser launchers
+fetch game data from `https://storage.googleapis.com/demos_opende/demo_v1/deusex.data.gz`.
+The build's `index.data` stays in ignored `build-web-local/`; `static/*.data` is
+also ignored by Git. If game assets change, the hosted bundle must be updated
+to match the generated loader before deploying it.
+Use `--jobs`, `--zone`, `--machine-type`, or `--max-run-duration` to override the
+defaults; the last two affect new VMs only.
+
+The VM remains running between builds. Delete it and its boot disk when finished:
+
+```sh
+./build_web.sh --project YOUR_PROJECT --vm opende-build --delete-vm
+```
+
+This deletes only an instance labeled `purpose=opende-build`. Download anything
+you need before manual deletion or the automatic deadline.
 
 ## Running
 

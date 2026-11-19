@@ -1,0 +1,350 @@
+{
+  "source_page": "https://jarmitage99.itch.io/opende",
+  "source_build": "https://html-classic.itch.zone/html/19907520/",
+  "downloaded_on": "2026-11-12",
+  "local_changes": [
+    "Removed the itch.io embed tracking/hotlink script from index.html for standalone local use.",
+    "Formatted index.html for readability.",
+    "Added controls.js: scroll up holds S, scroll down holds W, releasing 180 ms after the final wheel event.",
+    "Added a 50 ms primary-click debounce; secondary-click/context-menu gestures cancel pending primary presses, with a short secondary-click cooldown and focus cleanup.",
+    "Added lifecycle.js to pause the Emscripten main loop, suspend game audio, and stop periodic saves when the page is hidden or unfocused; resume on return and save once on leaving.",
+    "Added independent horizontal scroll turning through original Z/C turn bindings; physical C/T/Z remap to original X/Backspace/LeftBracket for crouch, weapon equip/unequip, and zoom. Other keys pass through.",
+    "Inverted horizontal scrolling; reduced turn input to one-third duty cycle; require horizontal motion at least twice vertical motion to turn, otherwise favor forward/back movement.",
+    "Replaced pulsed scrolling turns with continuous key holds at axis speed 50 (original 150). Before main(), update the browser User.ini turn aliases and F=PutInHand, T=PrevBeltItem, Y=NextBeltItem, R=ReloadWeapon while preserving other settings. C/Z shim mappings remain.",
+    "Scroll axes now hold and release independently, allowing simultaneous forward/back movement and turning on diagonal gestures.",
+    "Swapped T/Y: T selects next item; Y selects previous item."
+  ],
+  "serve_command": "python3 -m http.server 8000 --directory static",
+  "files": {
+    "index.html": {
+      "bytes": 5799,
+      "sha256": "8440ecb61c5b32874c0e36f79a4e6b2f85515abbadc68cdf11578d1d75b2729e"
+    },
+    "deusex.js": {
+      "bytes": 2032903,
+      "sha256": "48748192323b536616c0f2ba3b51cff8d4670aa17f5c9e3cabecfbd8a9ba416a"
+    },
+    "deusex.wasm": {
+      "bytes": 2218928,
+      "sha256": "829a05788d7d6e59f57332a341410cb02f553c523a7c7b9d61cc84f565c1f618"
+    },
+    "deusex.data": {
+      "bytes": 175125334,
+      "sha256": "273f98e1c98f7a09cc223546523f4122738d2af700d90a141f97dfaee515b33b"
+    },
+    "controls.js": {
+      "bytes": 10291,
+      "sha256": "20604297be6ef464b98a6942cff5d25910a46f96af72ebffa335e67921ba65e3"
+    },
+    "lifecycle.js": {
+      "bytes": 2756,
+      "sha256": "79b54c22e12da0ae6ee443058c54fec3f26be7f4f60ca6484e65d1fee41ea7bd"
+    }
+  },
+  "bundled_game_assets": [
+    {
+      "path": "/game/Maps/00_Training.dx",
+      "uncompressed_bytes": 4386033
+    },
+    {
+      "path": "/game/Maps/00_TrainingCombat.dx",
+      "uncompressed_bytes": 2297793
+    },
+    {
+      "path": "/game/Maps/00_TrainingFinal.dx",
+      "uncompressed_bytes": 3769371
+    },
+    {
+      "path": "/game/Maps/01_NYC_UNATCOHQ.dx",
+      "uncompressed_bytes": 2576387
+    },
+    {
+      "path": "/game/Maps/01_NYC_UNATCOIsland.dx",
+      "uncompressed_bytes": 9411597
+    },
+    {
+      "path": "/game/Maps/DX.dx",
+      "uncompressed_bytes": 17459
+    },
+    {
+      "path": "/game/Maps/DXOnly.dx",
+      "uncompressed_bytes": 6035
+    },
+    {
+      "path": "/game/Maps/Entry.dx",
+      "uncompressed_bytes": 9021
+    },
+    {
+      "path": "/game/Music/Credits_Music.umx",
+      "uncompressed_bytes": 1992028
+    },
+    {
+      "path": "/game/Music/LibertyIsland_Music.umx",
+      "uncompressed_bytes": 1645423
+    },
+    {
+      "path": "/game/Music/Title_Music.umx",
+      "uncompressed_bytes": 1976678
+    },
+    {
+      "path": "/game/Music/Training_Music.umx",
+      "uncompressed_bytes": 1450137
+    },
+    {
+      "path": "/game/Music/UNATCO_Music.umx",
+      "uncompressed_bytes": 1617090
+    },
+    {
+      "path": "/game/Sounds/Ambient.uax",
+      "uncompressed_bytes": 9748357
+    },
+    {
+      "path": "/game/Sounds/MoverSFX.uax",
+      "uncompressed_bytes": 3987934
+    },
+    {
+      "path": "/game/System/ConSys.u",
+      "uncompressed_bytes": 94789
+    },
+    {
+      "path": "/game/System/Core.int",
+      "uncompressed_bytes": 3282
+    },
+    {
+      "path": "/game/System/Core.u",
+      "uncompressed_bytes": 60238
+    },
+    {
+      "path": "/game/System/DefUser.ini",
+      "uncompressed_bytes": 5959
+    },
+    {
+      "path": "/game/System/Default.ini",
+      "uncompressed_bytes": 6786
+    },
+    {
+      "path": "/game/System/DeusEx.ini",
+      "uncompressed_bytes": 6786
+    },
+    {
+      "path": "/game/System/DeusEx.int",
+      "uncompressed_bytes": 75181
+    },
+    {
+      "path": "/game/System/DeusEx.u",
+      "uncompressed_bytes": 4559245
+    },
+    {
+      "path": "/game/System/DeusExCharacters.u",
+      "uncompressed_bytes": 27310840
+    },
+    {
+      "path": "/game/System/DeusExConAudioAIBarks.u",
+      "uncompressed_bytes": 14756574
+    },
+    {
+      "path": "/game/System/DeusExConAudioMission00.u",
+      "uncompressed_bytes": 5151373
+    },
+    {
+      "path": "/game/System/DeusExConAudioMission01.u",
+      "uncompressed_bytes": 12444736
+    },
+    {
+      "path": "/game/System/DeusExConText.u",
+      "uncompressed_bytes": 3926057
+    },
+    {
+      "path": "/game/System/DeusExConversations.u",
+      "uncompressed_bytes": 2292
+    },
+    {
+      "path": "/game/System/DeusExDeco.u",
+      "uncompressed_bytes": 9840776
+    },
+    {
+      "path": "/game/System/DeusExItems.u",
+      "uncompressed_bytes": 5815187
+    },
+    {
+      "path": "/game/System/DeusExSounds.u",
+      "uncompressed_bytes": 16930035
+    },
+    {
+      "path": "/game/System/DeusExText.u",
+      "uncompressed_bytes": 375246
+    },
+    {
+      "path": "/game/System/DeusExUI.u",
+      "uncompressed_bytes": 25978948
+    },
+    {
+      "path": "/game/System/Engine.int",
+      "uncompressed_bytes": 4993
+    },
+    {
+      "path": "/game/System/Engine.u",
+      "uncompressed_bytes": 1394564
+    },
+    {
+      "path": "/game/System/Extension.u",
+      "uncompressed_bytes": 366871
+    },
+    {
+      "path": "/game/System/Fire.u",
+      "uncompressed_bytes": 14926
+    },
+    {
+      "path": "/game/System/Manifest.ini",
+      "uncompressed_bytes": 11299
+    },
+    {
+      "path": "/game/System/User.ini",
+      "uncompressed_bytes": 5959
+    },
+    {
+      "path": "/game/Textures/Area51Textures.utx",
+      "uncompressed_bytes": 3025133
+    },
+    {
+      "path": "/game/Textures/BatteryPark.utx",
+      "uncompressed_bytes": 2980734
+    },
+    {
+      "path": "/game/Textures/BobPage.utx",
+      "uncompressed_bytes": 10122
+    },
+    {
+      "path": "/game/Textures/Catacombs.utx",
+      "uncompressed_bytes": 1557535
+    },
+    {
+      "path": "/game/Textures/Cmd_Tunnels.utx",
+      "uncompressed_bytes": 389982
+    },
+    {
+      "path": "/game/Textures/Constructor.utx",
+      "uncompressed_bytes": 201485
+    },
+    {
+      "path": "/game/Textures/CoreTexBrick.utx",
+      "uncompressed_bytes": 523868
+    },
+    {
+      "path": "/game/Textures/CoreTexCeramic.utx",
+      "uncompressed_bytes": 149500
+    },
+    {
+      "path": "/game/Textures/CoreTexConcrete.utx",
+      "uncompressed_bytes": 1130768
+    },
+    {
+      "path": "/game/Textures/CoreTexDetail.utx",
+      "uncompressed_bytes": 283939
+    },
+    {
+      "path": "/game/Textures/CoreTexFoliage.utx",
+      "uncompressed_bytes": 199841
+    },
+    {
+      "path": "/game/Textures/CoreTexGlass.utx",
+      "uncompressed_bytes": 450742
+    },
+    {
+      "path": "/game/Textures/CoreTexMetal.utx",
+      "uncompressed_bytes": 5586282
+    },
+    {
+      "path": "/game/Textures/CoreTexMisc.utx",
+      "uncompressed_bytes": 6031976
+    },
+    {
+      "path": "/game/Textures/CoreTexPaper.utx",
+      "uncompressed_bytes": 109872
+    },
+    {
+      "path": "/game/Textures/CoreTexSky.utx",
+      "uncompressed_bytes": 1720642
+    },
+    {
+      "path": "/game/Textures/CoreTexStone.utx",
+      "uncompressed_bytes": 777807
+    },
+    {
+      "path": "/game/Textures/CoreTexTextile.utx",
+      "uncompressed_bytes": 95985
+    },
+    {
+      "path": "/game/Textures/CoreTexTiles.utx",
+      "uncompressed_bytes": 187987
+    },
+    {
+      "path": "/game/Textures/CoreTexWallObj.utx",
+      "uncompressed_bytes": 689106
+    },
+    {
+      "path": "/game/Textures/CoreTexWood.utx",
+      "uncompressed_bytes": 1920647
+    },
+    {
+      "path": "/game/Textures/DXFonts.utx",
+      "uncompressed_bytes": 273241
+    },
+    {
+      "path": "/game/Textures/Effects.utx",
+      "uncompressed_bytes": 678784
+    },
+    {
+      "path": "/game/Textures/HK_MJ12Lab.utx",
+      "uncompressed_bytes": 579400
+    },
+    {
+      "path": "/game/Textures/InfoPortraits.utx",
+      "uncompressed_bytes": 110821
+    },
+    {
+      "path": "/game/Textures/Mobile_Camp.utx",
+      "uncompressed_bytes": 437592
+    },
+    {
+      "path": "/game/Textures/NYCBar.utx",
+      "uncompressed_bytes": 952219
+    },
+    {
+      "path": "/game/Textures/NewYorkCity.utx",
+      "uncompressed_bytes": 6590004
+    },
+    {
+      "path": "/game/Textures/OceanLab.utx",
+      "uncompressed_bytes": 1083486
+    },
+    {
+      "path": "/game/Textures/Palettes.utx",
+      "uncompressed_bytes": 421024
+    },
+    {
+      "path": "/game/Textures/Paris.utx",
+      "uncompressed_bytes": 2797050
+    },
+    {
+      "path": "/game/Textures/Render.utx",
+      "uncompressed_bytes": 88914
+    },
+    {
+      "path": "/game/Textures/Rocket.utx",
+      "uncompressed_bytes": 2443671
+    },
+    {
+      "path": "/game/Textures/Supertanker.utx",
+      "uncompressed_bytes": 2727799
+    },
+    {
+      "path": "/game/Textures/UNATCO.utx",
+      "uncompressed_bytes": 4406928
+    },
+    {
+      "path": "/game/Textures/V_Com_Center.utx",
+      "uncompressed_bytes": 1496835
+    }
+  ]
+}
