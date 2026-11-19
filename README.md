@@ -138,7 +138,7 @@ to copy an earlier VM workspace's exported assets into the new workspace.
 in this checkout. Each invocation uploads a fresh source snapshot. Successful
 builds download to `build-web-local/`, verify SHA-256 checksums, and update the
 matching `static/deusex.js` and `static/deusex.wasm` files. Both browser launchers
-fetch game data from `https://storage.googleapis.com/demos_opende/demo_v1/deusex.data`.
+fetch game data from `https://storage.googleapis.com/demos_opende/demo_v1/deusex.data.gz`.
 The build's `index.data` stays in ignored `build-web-local/`; `static/*.data` is
 also ignored by Git. If game assets change, the hosted bundle must be updated
 to match the generated loader before deploying it.

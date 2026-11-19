@@ -5,6 +5,8 @@
         <meta charset=utf-8>
         <meta content="width=device-width,initial-scale=1,viewport-fit=cover" name=viewport>
         <title>OpenDE Demo</title>
+        <link rel=preconnect href="https://storage.googleapis.com" crossorigin>
+        <script src="data-source.js"></script>
         <style>
             :root {
                 --background: #1a1a1a;
@@ -223,7 +225,10 @@
             // The generated Emscripten loader uses index.* in the standalone build.
             Module.locateFile = (name, prefix) => {
                 if (name === "index.wasm") return prefix + "deusex.wasm";
-                if (name === "index.data" || name === "deusex.data") return "https://storage.googleapis.com/demos_opende/demo_v1/deusex.data";
+                if (name === "index.data" || name === "deusex.data") {
+                    OpenDEDataSource.loaderStarted = true;
+                    return OpenDEDataSource.url;
+                }
                 return prefix + name;
             };
             var startLevel = new URLSearchParams(window.location.search).get("level");
