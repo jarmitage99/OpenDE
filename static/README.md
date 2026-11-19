@@ -32,10 +32,16 @@ In a local headless Chrome comparison on Liberty Island with ANGLE Metal, vertex
 - The CMake-generated `bin/index.html` uses its own shell and save hooks. The custom input and lifecycle scripts are wired into `static/index.html`, so serve `static/` to get both. [run.sh](run.sh) is a macOS shortcut for serving that directory on port 7331 and opening the Explore page.
 
 
+## Web / Classic mode
+
+The checked Web/Classic option enables web controls. Unchecking switches immediately to the shipped demo's keyboard bindings and native mouse/wheel input, with no touch gestures, click debounce, scroll movement, or keyboard remapping. The action buttons remain usable in either mode and their hints update to match. Classic uses `[` for Zoom, `;` for Reload, `I` for Items, hold `X` for crouch, `F`/`End` for Recenter, and wheel-down for Next Item. `C`/`Z` turn and `R`/`V` look up/down at native speeds.
+
+Startup restores the `Engine.Input` section from the packaged `DefUser.ini`, removing previous web binding changes while preserving other settings sections. INI sections are parsed line by line with CRLF normalization; startup repairs joined headers from the earlier rewrite and restores missing player sections from the packaged defaults. Web-only slow look axes use unbound keypad keys; physical presses of these helper keys are ignored in Classic. Mode switches release held shim inputs. Web key translations happen in JavaScript so switching does not require a reload or engine rebuild.
+
 ## Touchscreen controls
 
 - Drag one finger right away to walk and turn. Hold still for 350 ms to send one right-click, then drag to look around. With two fingers, use the left finger to move and strafe and the right finger to look.
-- A single tap left-clicks after a 250 ms double-tap window. Double-tap holds W and Space together for 250 ms to jump forward.
+- A single tap left-clicks after a 250 ms double-tap window. Double-tap holds End for 120 ms to recenter. The Jump+Fwd button holds W immediately, adds Space at 80 ms, releases Space at 300 ms, and releases W at 420 ms.
 - The shortcut panel is available with touch or mouse below the game in normal view. Fullscreen shows only the game area, without the shortcut panel. It includes Crouch toggle, Next weapon, Zoom, Reload, Items, and Menu. Items opens and closes Inventory.
 - Touch releases browser pointer lock and suppresses further capture requests while playing by touch. A mouse click on the game can restore capture.
 
@@ -43,7 +49,7 @@ In a local headless Chrome comparison on Liberty Island with ANGLE Metal, vertex
 
 - Delay primary mouse input by 50 ms so a secondary click or context-menu gesture can cancel an overlapping primary click and briefly suppress new ones. Forward real secondary clicks immediately. For a quick primary tap, dispatch both the down and up events after the delay. Clear pending mouse and wheel input on focus loss, page hide, or pointer unlock.
 - Scroll down to move forward and up to move backward. Scroll left to turn right and right to turn left. The two axes hold and release independently, so diagonal scrolling moves and turns at the same time. Each axis releases 180 ms after its last event. Physical W or S takes priority over vertical scrolling.
-- In [controls.js](controls.js), capture real wheel events over the canvas or while it holds pointer lock. Send synthetic W/S for movement and the original Z/C turn bindings for turning. Set the `TurnLeft` and `TurnRight` aliases to `aBaseX` speeds of −50 and +50 in the browser's `User.ini` (previously ±150). The handler lets Ctrl+wheel pass through.
+- In [controls.js](controls.js), capture real wheel events over the canvas or while it holds pointer lock. Send synthetic W/S for movement and the original Z/C turn bindings for turning. Use dedicated keypad axes at speeds of −50 and +50 for web turning; keep classic `TurnLeft` and `TurnRight` aliases at ±150. The handler lets Ctrl+wheel pass through.
 - For a touchpad-only change, keep the wheel-to-movement handler, turn alias edits, primary-click debounce, and related focus cleanup. Keep physical C/Z on their original turn bindings and leave the keyboard binding edits out. The relevant history starts at `519fd8d`, `a3e2236`, and `f7428c5`. The last commit also includes early keyboard edits.
 
 ## Keyboard binding changes
@@ -52,14 +58,14 @@ In a local headless Chrome comparison on Liberty Island with ANGLE Metal, vertex
 | --- | --- | --- |
 | C | Hold to crouch | Hold the game's X (`Duck`) binding |
 | X | Toggle crouch | Latch the same X binding once per press. Either crouch input can keep it held |
-| T | Throw or drop the held item | Forward Tab with `Tab=DropItem`. Also set `T=DropItem` |
-| F / V | Next / previous belt item | Emit one synthetic wheel step per press using `MouseWheelDown=NextBeltItem` and `MouseWheelUp=PrevBeltItem`. Also set `F=NextBeltItem` and `V=PrevBeltItem` |
-| Y | Equip or unequip | `Y=PutInHand` |
-| R | Reload | `R=ReloadWeapon` |
+| T | Throw or drop the held item | Forward Tab with `Tab=DropItem`. Classic T remains unbound |
+| F / V | Next / previous belt item | Emit one synthetic wheel step per press using `MouseWheelDown=NextBeltItem` and `MouseWheelUp=PrevBeltItem`. Classic F/V keep CenterView/LookDown |
+| Y | Equip or unequip | Forward Backspace |
+| R | Reload | Forward Semicolon |
 | Z | Zoom | Forward Left Bracket, the demo's zoom binding |
-| Tab | Inventory | Forward I with `I=ShowInventoryWindow`. Bind F1 to the same action |
+| Tab | Inventory | Forward I with `I=ShowInventoryWindow`. Classic Tab retains DropItem |
 
-Load [controls.js](controls.js) after the page defines `Module` and before Emscripten's loader. In `onRuntimeInitialized`, after restoring browser storage and before the game starts, read the saved `/home/web_user/.local/share/deusex/User.ini` or fall back to `/game/System/User.ini`. Write the selected bindings to the browser's user file, preserve unrelated settings, and force `bToggleCrouch=False` so the shim owns crouch state. Track synthetic events so the keyboard remaps leave synthetic C/Z from scrolling alone and the wheel handler lets synthetic F/V item cycling through. Release remapped keys and crouch state when focus or pointer capture is lost.
+Load [controls.js](controls.js) after the page defines `Module` and before Emscripten's loader. In `onRuntimeInitialized`, after restoring browser storage and before the game starts, read the saved `/home/web_user/.local/share/deusex/User.ini` or fall back to `/game/System/User.ini`. Write the stable native binding map and helper axes to the browser's user file, preserve unrelated settings, and force `bToggleCrouch=False` so the web shim can own crouch state. Track synthetic events so the keyboard remaps leave synthetic C/Z from scrolling alone and the wheel handler lets synthetic F/V item cycling through. Release remapped keys and crouch state when focus or pointer capture is lost.
 
 For a keyboard-only change, keep the key handlers, key-related INI edits, and key-state cleanup. Leave real wheel input on the game's belt bindings alongside F/V and retain the original turn speeds. Review `c848a9a` and `321ba34` together for the final bindings. The tests in `static/tests/controls.test.cjs` cover keyboard bindings, double-tap jumping, and hold gestures.
 

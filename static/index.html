@@ -141,6 +141,11 @@
                 touch-action: manipulation;
             }
 
+            #game-shortcuts .shortcut-hint {
+                font-size: .8em;
+                opacity: .8;
+            }
+
             #game-shortcuts label {
                 display: flex;
                 align-items: center;
@@ -197,15 +202,15 @@
                 </div>
                 <fieldset disabled id=game-shortcuts aria-label="Game shortcuts">
                     <label><input type=checkbox id=touch-laptop checked>Web/Classic</label>
-                    <button type=button data-mouse=2>Activate</button>
-                    <button type=button class=item-control data-key=KeyZ>Zoom</button>
-                    <button type=button class=item-control data-key=KeyR>Reload</button>
-                    <button type=button class=item-control data-key=KeyF>Next Item</button>
-                    <button type=button class=item-control data-key=KeyX id=shortcut-crouch aria-pressed=false>Crouch</button>
-                    <button type=button class=item-control data-key=End>Recenter</button>
-                    <button type=button class=item-control data-action=jump-forward>Jump+Fwd</button>
-                    <button type=button data-key=Tab>Items</button>
-                    <button type=button data-key=Escape>Menu</button>
+                    <button type=button data-mouse=2>Activate <span class=shortcut-hint data-web="touch-hold" data-classic="Right-click">(touch-hold)</span></button>
+                    <button type=button class=item-control data-key=KeyZ>Zoom <span class=shortcut-hint data-web="Z" data-classic="[">(Z)</span></button>
+                    <button type=button class=item-control data-key=KeyR>Reload <span class=shortcut-hint data-web="R" data-classic=";">(R)</span></button>
+                    <button type=button class=item-control data-key=KeyF>Next Item <span class=shortcut-hint data-web="F" data-classic="wheel down">(F)</span></button>
+                    <button type=button class=item-control data-action=jump-forward>Jump+Fwd <span class=shortcut-hint>(W + Space)</span></button>
+                    <button type=button class=item-control data-key=End>Recenter <span class=shortcut-hint data-web="End" data-classic="End">(End)</span></button>
+                    <button type=button class=item-control data-key=KeyX id=shortcut-crouch aria-pressed=false>Crouch <span class=shortcut-hint>(X)</span></button>
+                    <button type=button data-key=Tab>Items <span class=shortcut-hint data-web="Tab" data-classic="I">(Tab)</span></button>
+                    <button type=button data-key=Escape>Menu <span class=shortcut-hint>(Esc)</span></button>
                 </fieldset>
             </div>
             <div class=toolbar><span>Click the game window to capture the mouse.</span></div>
@@ -218,10 +223,11 @@
                 <p>Report any issues on the repo: <a
                         href=https://github.com/jarmitage99/OpenDE>github.com/jarmitage99/OpenDE</a></p>
                 <h2>Controls</h2>
-                <p>WASD to move, LMB to fire, RMB to use. Tab toggles the inventory and ESC the main menu.</p>
-                <p>Scroll up to walk backward; scroll down to walk forward. Keep scrolling to keep moving.</p>
+                <p>WASD to move, LMB to fire, RMB to use. ESC opens the main menu. Checked Web/Classic enables web controls; uncheck it for the original demo bindings.</p>
+                <p>Classic: [ to zoom, ; to reload, I for inventory, X to hold crouch, F or End to recenter, Backspace to equip/unequip, Tab to drop, and the mouse wheel to cycle items. C/Z turn and R/V look up/down.</p>
+                <p>In Web mode, scroll up to walk backward; scroll down to walk forward. Keep scrolling to keep moving.</p>
                 <p>Scroll left to turn right; scroll right to turn left. Turning is slower. Scroll diagonally to move and turn at the same time.</p>
-                <p>Hold C to crouch, X to toggle crouch, T to throw/drop, Y to equip/unequip your weapon, F/V for next/previous weapon/item, R to reload, Z to zoom.</p>
+                <p>In Web mode, hold C to crouch, X to toggle crouch, T to throw/drop, Y to equip/unequip your weapon, F/V for next/previous weapon/item, R to reload, Z to zoom.</p>
                 <p>On touchscreens, drag one finger right away to move or turn. Hold still to use, then drag to look around. With two fingers, drag the left finger to move or strafe and the right finger to look. Tap to fire or select, or double-tap to recenter the view.</p>
                 <p>Settings and saved games are kept in browser storage.</p>
             </section>
@@ -302,7 +308,7 @@
                 screenElement.requestFullscreen().catch(error => console.error("Fullscreen failed", error));
             }, true);
         </script>
-        <script src="controls.js?v=20261118-10"></script>
+        <script src="controls.js?v=20261118-13"></script>
         <script src=lifecycle.js></script>
         <script async src=deusex.js></script>
     </body>
