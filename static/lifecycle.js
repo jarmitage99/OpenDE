@@ -21,6 +21,8 @@
         for (const context of contexts) {
             if (!context || audioContexts.has(context)) continue;
             audioContexts.add(context);
+            // Try playback on startup too; autoplay may already be permitted.
+            suspendedContexts.add(context);
             // Keep delayed engine/audio-unlock callbacks from restarting audio in the background.
             context.addEventListener("statechange", () => {
                 if (active === false && context.state === "running") suspendAudio(context);
@@ -52,6 +54,23 @@
             if (wasActive === false) Module.resumeMainLoop();
             saveTimer = setInterval(persist, 10000);
         }
+    }
+
+    function unlockAudio(event) {
+        // Synthetic game-control events must not trigger audio resumes.
+        if (!event.isTrusted || !ready || !pageShown || !document.hasFocus() || document.hidden) return;
+        collectAudioContexts();
+        for (const context of audioContexts) {
+            if (context.state === "suspended" || context.state === "interrupted") {
+                context.resume().catch(error => console.error("Audio resume failed", error));
+            }
+        }
+    }
+
+    // Autoplay-blocked contexts need a real gesture. Include keyboard play,
+    // and run before the game controls consume the event.
+    for (const type of ["keydown", "click", "touchend"]) {
+        window.addEventListener(type, unlockAudio, true);
     }
 
     Module.postRun.push(() => {
