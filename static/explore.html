@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Explore OpenDE</title>
+    <style>
+        :root { color-scheme: dark; }
+        body {
+            margin: 0;
+            background: #1a1a1a;
+            color: #d9d9d9;
+            font: 16px/1.5 system-ui, sans-serif;
+        }
+        main { max-width: 640px; margin: 48px auto; padding: 0 20px; }
+        h1 { font-size: 28px; }
+        ul { list-style: none; padding: 0; }
+        li { margin: 16px 0; }
+        a {
+            display: block;
+            padding: 20px;
+            border: 1px solid #969999;
+            border-radius: 8px;
+            color: #58b3d7;
+            text-decoration: none;
+        }
+        a:hover, a:focus-visible { background: #303333; }
+        strong { display: block; font-size: 20px; text-decoration: underline; }
+        span { color: #d9d9d9; }
+    </style>
+</head>
+<body>
+    <main>
+        <h1>Explore OpenDE</h1>
+        <p>Choose where to start playing the Deus Ex demo.</p>
+        <ul>
+            <li><a href="index.html">
+                <strong>Main Menu</strong>
+                <span>Start normally at the game's main menu.</span>
+            </a></li>
+            <li><a href="index.html?level=training">
+                <strong>Training: Basics</strong>
+                <span>Learn the controls in the training level.</span>
+            </a></li>
+            <li><a href="index.html?level=training_combat">
+                <strong>Training: Combat</strong>
+                <span>Start the combat training section.</span>
+            </a></li>
+            <li><a href="index.html?level=training_final">
+                <strong>Training: Stealth</strong>
+                <span>Start the final training section.</span>
+            </a></li>
+            <li><a href="index.html?level=game">
+                <strong>UNATCO/Liberty Island</strong>
+                <span>Start the main game on Liberty Island.</span>
+            </a></li>
+            <li><a href="index.html?level=unatco_hq">
+                <strong>UNATCO Headquarters</strong>
+                <span>Jump directly into UNATCO headquarters.</span>
+            </a></li>
+        </ul>
+    </main>
+</body>
+</html>

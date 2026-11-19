@@ -73,6 +73,59 @@ Then open `http://localhost:8000/`. The game data is LZ4 compressed
 and cached in IndexedDB after the first download, together with settings
 and saved games.
 
+To provision a temporary Google Cloud build VM and upload this checkout:
+
+```sh
+./build_web.sh --project YOUR_PROJECT --vm opende-build --create --prepare-only
+```
+
+The defaults are Ubuntu 24.04 in `us-west1-a`, 16 vCPUs, 64 GB RAM, a 100 GB
+boot disk, and automatic deletion after 24 hours. The script installs Emscripten
+6.0.12 and build tools, then keeps source snapshots under
+`~/build/OpenDE-Web/run.*/source`. It includes vendored dependencies and `static/`,
+but excludes Git metadata, local build outputs, caches, and local credential
+directories. Game data is uploaded separately when supplied.
+
+If this checkout contains `static/deusex.data` and its matching `static/deusex.js`,
+no separate game-data download is needed. The script verifies the package's
+SHA-256, reads its LZ4 chunk tables and file ranges from the loader, and exports
+the assets into the VM workspace's `game-data/` directory before building.
+`static/scripts/unpack-web-data.py` performs this step without executing the loader;
+it uses `python3-lz4`, which the VM setup installs. The older
+`static/source-manifest.json` is informational, not the current chunk schema.
+
+Build on that VM and download the verified browser bundle:
+
+```sh
+./build_web.sh --project YOUR_PROJECT --vm opende-build --game-data /path/to/demo-data
+```
+
+Omit `--game-data` to use the bundled static assets or a local data directory.
+If those local assets have been removed, use
+`--remote-game-data /home/USER/build/OpenDE-Web/run.PREVIOUS/game-data`
+to copy an earlier VM workspace's exported assets into the new workspace.
+
+`--game-data` is a local directory containing `System`, `Maps`, `Textures`,
+`Sounds`, and `Music`; by default the script looks for `demo-data/` or `game-data/`
+in this checkout. Each invocation uploads a fresh source snapshot. Successful
+builds download to `build-web-local/`, verify SHA-256 checksums, and update the
+matching `static/deusex.js` and `static/deusex.wasm` files. Both browser launchers
+fetch game data from `https://storage.googleapis.com/demos_opende/demo_v1/deusex.data`.
+The build's `index.data` stays in ignored `build-web-local/`; `static/*.data` is
+also ignored by Git. If game assets change, the hosted bundle must be updated
+to match the generated loader before deploying it.
+Use `--jobs`, `--zone`, `--machine-type`, or `--max-run-duration` to override the
+defaults; the last two affect new VMs only.
+
+The VM remains running between builds. Delete it and its boot disk when finished:
+
+```sh
+./build_web.sh --project YOUR_PROJECT --vm opende-build --delete-vm
+```
+
+This deletes only an instance labeled `purpose=opende-build`. Download anything
+you need before manual deletion or the automatic deadline.
+
 ## Running
 
     $ build/bin/deusex

@@ -20,9 +20,20 @@ html, body {
     font: 15px/1.5 system-ui, sans-serif;
 }
 main {
-    width: 800px;
+    width: min(802px, calc(100% - 24px));
     margin: 24px auto;
 }
+header {
+    padding-right: 128px;
+}
+
+#fullscreen {
+    position: fixed;
+    top: 12px;
+    right: 12px;
+    z-index: 10;
+}
+
 header h1 {
     margin: 0;
     font-size: 24px;
@@ -43,6 +54,8 @@ a {
 }
 #canvas {
     display: block;
+    width: 100% !important;
+    height: 100% !important;
     outline: none;
 }
 #status {
@@ -50,7 +63,7 @@ a {
     left: 50%;
     top: 50%;
     transform: translate(-50%, -50%);
-    width: 480px;
+    width: min(480px, 90%);
     text-align: center;
 }
 #progress {
@@ -86,9 +99,22 @@ section {
 section h2 {
     font-size: 17px;
 }
+#screen:fullscreen {
+    width: 100% !important;
+    height: 100% !important;
+    border: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+#screen:fullscreen #canvas {
+    width: min(100vw, calc(100vh * var(--render-width, 800) / var(--render-height, 600))) !important;
+    height: min(100vh, calc(100vw * var(--render-height, 600) / var(--render-width, 800))) !important;
+}
 </style>
 </head>
 <body>
+<button id="fullscreen" disabled>Fullscreen</button>
 <main>
 <header>
 <h1>OpenDE</h1>
@@ -100,14 +126,14 @@ section h2 {
 </div>
 <div class="toolbar">
 <span>During play, click the game to capture the mouse.</span>
-<button id="fullscreen" disabled>Fullscreen</button>
 </div>
 <section>
 <h2>About</h2>
 <p>OpenDE runs the original game's UnrealScript bytecode from the shipped packages on a new C++ engine. This page is the same engine compiled to WebAssembly with Emscripten, drawing with WebGL 2. It plays the Deus Ex demo (version 1002f), which includes the training mission, Liberty Island and UNATCO headquarters.</p>
 <p>Source code, build instructions and the issue tracker: <a href="https://github.com/jarmitage99/OpenDE">github.com/jarmitage99/OpenDE</a></p>
 <h2>Controls</h2>
-<p>W A S D to move, mouse to look, left click to fire, right click to use. F1 opens the inventory and Escape the main menu. Keypad + quick saves and keypad / quick loads. In fullscreen, Escape returns to this page.</p>
+<p>W A S D to move, mouse to look, left click to fire, right click to use. Tab toggles the inventory and Escape the main menu. Keypad + quick saves and keypad / quick loads. In fullscreen, Escape returns to this page.</p>
+<p>Hold C to crouch, X to toggle crouch, T to throw/drop, F/V for next/previous weapon/item, Y to equip/unequip, R to reload, Z to zoom.</p>
 <p>Settings and saved games are kept in this browser's storage.</p>
 </section>
 </main>
@@ -125,6 +151,12 @@ function persist() {
     });
 }
 var Module = {
+    locateFile: function (name, prefix) {
+        if (name === "index.data" || name === "deusex.data") {
+            return "https://storage.googleapis.com/demos_opende/demo_v1/deusex.data";
+        }
+        return prefix + name;
+    },
     canvas: document.getElementById("canvas"),
     arguments: ["--width", "800", "--height", "600"],
     preRun: [function () {
@@ -164,8 +196,71 @@ var Module = {
         messageElement.textContent = "Error: " + reason;
     }
 };
+var startLevel = new URLSearchParams(window.location.search).get("level");
+var startMaps = {
+    training: "00_Training",
+    training_combat: "00_TrainingCombat",
+    training_final: "00_TrainingFinal",
+    game: "01_NYC_UNATCOIsland",
+    unatco_hq: "01_NYC_UNATCOHQ"
+};
+if (Object.prototype.hasOwnProperty.call(startMaps, startLevel)) {
+    Module.arguments.push(startMaps[startLevel]);
+}
 Module.canvas.addEventListener("click", function () {
     Module.canvas.focus();
+});
+</script>
+<script>
+// Resize the presentation only. Canvas width/height remain owned by the game.
+const screenElement = document.getElementById("screen");
+const gameCanvas = document.getElementById("canvas");
+function fitScreen() {
+    const renderWidth = gameCanvas.width;
+    const renderHeight = gameCanvas.height;
+    if (!renderWidth || !renderHeight) return;
+    screenElement.style.setProperty("--render-width", renderWidth);
+    screenElement.style.setProperty("--render-height", renderHeight);
+    if (document.fullscreenElement) return;
+    const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
+    const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+    const availableWidth = Math.max(0, viewportWidth - 26);
+    const maxWidth = Math.min(renderWidth, availableWidth);
+    let displayWidth = maxWidth;
+    // Start from the full available width, so an old wrapped header cannot cap growth.
+    // Recheck after wrapping until both the heading and canvas fit vertically.
+    while (true) {
+        screenElement.parentElement.style.width = `${displayWidth + 2}px`;
+        const top = screenElement.getBoundingClientRect().top + window.scrollY;
+        const availableHeight = Math.max(0, viewportHeight - top - 14);
+        const nextWidth = Math.min(maxWidth, availableHeight * renderWidth / renderHeight);
+        if (nextWidth >= displayWidth) break;
+        displayWidth = nextWidth;
+    }
+    screenElement.style.width = `${displayWidth}px`;
+    screenElement.style.height = `${displayWidth * renderHeight / renderWidth}px`;
+}
+window.addEventListener("resize", fitScreen);
+document.addEventListener("fullscreenchange", fitScreen);
+window.visualViewport?.addEventListener("resize", fitScreen);
+new ResizeObserver(fitScreen).observe(document.querySelector("header"));
+new MutationObserver(fitScreen).observe(gameCanvas, { attributes: true, attributeFilter: ["width", "height"] });
+// SDL initializes from the canvas CSS size. Give it the native size before main().
+const previousRuntimeInitializedForScreen = Module.onRuntimeInitialized;
+Module.onRuntimeInitialized = () => {
+    screenElement.style.width = "800px";
+    screenElement.style.height = "600px";
+    previousRuntimeInitializedForScreen?.();
+};
+Module.postRun.push(() => {
+    // SDL's window-resize callback otherwise copies CSS dimensions into the
+    // rendering buffer. This page owns display scaling; the game owns resolution.
+    JSEvents.removeAllHandlersOnTarget(window, "resize");
+    fitScreen();
+});
+fitScreen();
+fullscreenButton.addEventListener("click", () => {
+    screenElement.requestFullscreen().catch(error => console.error("Fullscreen failed", error));
 });
 </script>
 {{{ SCRIPT }}}
