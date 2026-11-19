@@ -7,6 +7,11 @@ const vm = require("node:vm");
 function createGame(ini = "[Engine.Input]\nX=Duck\nTab=DropItem\n") {
     const listeners = new Map();
     const canvasListeners = new Map();
+    const shortcutListeners = new Map();
+    const shortcuts = {
+        addEventListener(type, listener) { shortcutListeners.set(type, listener); },
+        contains() { return false; }
+    };
     const actions = [];
     const keyEvents = [];
     const touchEvents = [];
@@ -58,7 +63,7 @@ function createGame(ini = "[Engine.Input]\nX=Duck\nTab=DropItem\n") {
             analyzePath: () => ({ exists: true }), readFile: () => ini,
             mkdirTree() {}, writeFile: (file, text) => { settings = text; }
         },
-        document: { getElementById: id => id === "canvas" ? canvas : null, addEventListener() {} },
+        document: { getElementById: id => id === "canvas" ? canvas : id === "game-shortcuts" ? shortcuts : null, addEventListener() {} },
         window: {
             addEventListener(type, listener) {
                 if (!listeners.has(type)) listeners.set(type, []);
@@ -71,6 +76,12 @@ function createGame(ini = "[Engine.Input]\nX=Duck\nTab=DropItem\n") {
     Module.postRun.forEach(callback => callback());
     return {
         actions, keyEvents, touchEvents, mouseEvents, settings,
+        jumpForward() {
+            shortcutListeners.get("click")({ target: { closest: () => ({ dataset: { action: "jump-forward" } }) } });
+        },
+        recenter() {
+            shortcutListeners.get("click")({ target: { closest: () => ({ dataset: { key: "End" } }) } });
+        },
         blur() { dispatch(new InputEvent("blur", {})); },
         touch(type, timeStamp, clientX = 100, clientY = 100) {
             const point = { identifier: 1, clientX, clientY };
@@ -160,8 +171,7 @@ test("saved native toggle mode is disabled without altering other player setting
 
 test("forward jump leads with movement, releases jump first, and cancels on blur", async () => {
     const game = createGame();
-    game.tap(0);
-    game.tap(100);
+    game.jumpForward();
     const presses = [["keydown", "KeyW"], ["keydown", "Space"]];
     const releases = [["keyup", "Space"], ["keyup", "KeyW"]];
     assert.deepEqual(game.keyEvents, presses.slice(0, 1));
@@ -172,13 +182,40 @@ test("forward jump leads with movement, releases jump first, and cancels on blur
     assert.deepEqual(game.touchEvents, []);
     assert.deepEqual(game.actions, []);
 
-    game.tap(400);
-    game.tap(500);
+    game.jumpForward();
     game.blur();
     assert.deepEqual(game.keyEvents.slice(-2), [["keydown", "KeyW"], ["keyup", "KeyW"]]);
     const eventCount = game.keyEvents.length;
     await new Promise(resolve => setTimeout(resolve, 100));
     assert.equal(game.keyEvents.length, eventCount);
+});
+
+test("finger double-tap centers the view without jumping or firing", async () => {
+    const game = createGame();
+    game.tap(0);
+    game.tap(100);
+    assert.match(game.settings, /End=CenterView/);
+    assert.deepEqual(game.keyEvents, [["keydown", "End"]]);
+    await new Promise(resolve => setTimeout(resolve, 300));
+    assert.deepEqual(game.keyEvents, [["keydown", "End"], ["keyup", "End"]]);
+    assert.deepEqual(game.touchEvents, []);
+    assert.deepEqual(game.mouseEvents, []);
+    assert.deepEqual(game.actions, []);
+});
+
+test("Recenter holds End across a frame, releases it, and cancels on blur", async () => {
+    const game = createGame();
+    game.recenter();
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.deepEqual(game.keyEvents, [["keydown", "End"]]);
+    await new Promise(resolve => setTimeout(resolve, 120));
+    assert.deepEqual(game.keyEvents, [["keydown", "End"], ["keyup", "End"]]);
+    game.recenter();
+    game.recenter();
+    game.blur();
+    assert.deepEqual(game.keyEvents.slice(2), [["keydown", "End"], ["keyup", "End"]]);
+    await new Promise(resolve => setTimeout(resolve, 150));
+    assert.equal(game.keyEvents.length, 4);
 });
 
 test("a stationary hold right-clicks once before release and cancels cleanly", async () => {

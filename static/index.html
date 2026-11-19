@@ -117,12 +117,23 @@
 
             #game-shortcuts {
                 display: grid;
-                grid-template-columns: repeat(2, minmax(0, 1fr));
+                grid-template-columns: repeat(6, minmax(0, 1fr));
                 gap: 8px;
                 min-inline-size: 0;
                 margin: 8px 0;
                 padding: 0;
                 border: 0;
+            }
+
+            #game-shortcuts > * {
+                grid-column: span 3;
+                min-width: 0;
+            }
+
+            #game-shortcuts .item-control {
+                grid-column: span 2;
+                padding-inline: 8px;
+                overflow-wrap: anywhere;
             }
 
             #game-shortcuts button {
@@ -187,10 +198,12 @@
                 <fieldset disabled id=game-shortcuts aria-label="Game shortcuts">
                     <label><input type=checkbox id=touch-laptop checked>Web/Classic</label>
                     <button type=button data-mouse=2>Activate</button>
-                    <button type=button data-key=KeyX id=shortcut-crouch aria-pressed=false>Crouch</button>
-                    <button type=button data-action=jump-forward>Jump+Fwd</button>
-                    <button type=button data-key=KeyZ>Zoom</button>
-                    <button type=button data-key=KeyR>Reload</button>
+                    <button type=button class=item-control data-key=KeyZ>Zoom</button>
+                    <button type=button class=item-control data-key=KeyR>Reload</button>
+                    <button type=button class=item-control data-key=KeyF>Next Item</button>
+                    <button type=button class=item-control data-key=KeyX id=shortcut-crouch aria-pressed=false>Crouch</button>
+                    <button type=button class=item-control data-key=End>Recenter</button>
+                    <button type=button class=item-control data-action=jump-forward>Jump+Fwd</button>
                     <button type=button data-key=Tab>Items</button>
                     <button type=button data-key=Escape>Menu</button>
                 </fieldset>
@@ -209,7 +222,7 @@
                 <p>Scroll up to walk backward; scroll down to walk forward. Keep scrolling to keep moving.</p>
                 <p>Scroll left to turn right; scroll right to turn left. Turning is slower. Scroll diagonally to move and turn at the same time.</p>
                 <p>Hold C to crouch, X to toggle crouch, T to throw/drop, Y to equip/unequip your weapon, F/V for next/previous weapon/item, R to reload, Z to zoom.</p>
-                <p>On touchscreens, drag one finger right away to move or turn. Hold still to use, then drag to look around. With two fingers, drag the left finger to move or strafe and the right finger to look. Tap to fire or select, or double-tap to jump forward.</p>
+                <p>On touchscreens, drag one finger right away to move or turn. Hold still to use, then drag to look around. With two fingers, drag the left finger to move or strafe and the right finger to look. Tap to fire or select, or double-tap to recenter the view.</p>
                 <p>Settings and saved games are kept in browser storage.</p>
             </section>
         </main>
@@ -289,7 +302,7 @@
                 screenElement.requestFullscreen().catch(error => console.error("Fullscreen failed", error));
             }, true);
         </script>
-        <script src="controls.js?v=20261118-8"></script>
+        <script src="controls.js?v=20261118-10"></script>
         <script src=lifecycle.js></script>
         <script async src=deusex.js></script>
     </body>
