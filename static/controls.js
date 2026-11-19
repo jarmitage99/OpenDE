@@ -14,6 +14,8 @@
     const touchHoldMilliseconds = 350;
     const doubleTapMilliseconds = 250;
     const doubleTapDistance = 32;
+    const recenterHoldMilliseconds = 120;
+    let recenterTimer = null;
     // Jump+Fwd phases: run up, hold jump, then keep moving after releasing jump.
     const forwardJumpLeadMilliseconds = 80;
     const forwardJumpHoldMilliseconds = 220;
@@ -29,6 +31,7 @@
         KeyF: { key: "f", code: "KeyF", keyCode: 70, which: 70 },
         KeyR: { key: "r", code: "KeyR", keyCode: 82, which: 82 },
         Escape: { key: "Escape", code: "Escape", keyCode: 27, which: 27 },
+        End: { key: "End", code: "End", keyCode: 35, which: 35 },
         Space: { key: " ", code: "Space", keyCode: 32, which: 32 },
         Backspace: { key: "Backspace", code: "Backspace", keyCode: 8, which: 8 },
         Tab: { key: "Tab", code: "Tab", keyCode: 9, which: 9 },
@@ -89,7 +92,7 @@
     Module.onRuntimeInitialized = () => {
         const path = "/home/web_user/.local/share/deusex/User.ini";
         const source = FS.analyzePath(path).exists ? path : "/game/System/User.ini";
-        const bindings = { F: "NextBeltItem", T: "DropItem", V: "PrevBeltItem", Tab: "DropItem", X: "Duck", Y: "PutInHand", R: "ReloadWeapon", I: "ShowInventoryWindow", F1: "ShowInventoryWindow", MouseWheelDown: "NextBeltItem", MouseWheelUp: "PrevBeltItem" };
+        const bindings = { End: "CenterView", F: "NextBeltItem", T: "DropItem", V: "PrevBeltItem", Tab: "DropItem", X: "Duck", Y: "PutInHand", R: "ReloadWeapon", I: "ShowInventoryWindow", F1: "ShowInventoryWindow", MouseWheelDown: "NextBeltItem", MouseWheelUp: "PrevBeltItem" };
         const remaining = new Set(Object.keys(bindings));
         const settingsText = FS.readFile(source, { encoding: "utf8" });
         const newline = settingsText.includes("\r\n") ? "\r\n" : "\n";
@@ -172,6 +175,21 @@
         canvas.dispatchEvent(event);
     }
 
+    function releaseRecenter() {
+        if (recenterTimer === null) return;
+        clearTimeout(recenterTimer);
+        recenterTimer = null;
+        sendKey("keyup", "End");
+    }
+
+    function recenterView() {
+        // CenterView is "Button bSnapLevel" in the demo: keep it down across
+        // a game frame so the player can consume the input before keyup clears it.
+        if (recenterTimer === null) sendKey("keydown", "End");
+        clearTimeout(recenterTimer);
+        recenterTimer = setTimeout(releaseRecenter, recenterHoldMilliseconds);
+    }
+
     function updateCrouch() {
         crouchShortcut?.setAttribute("aria-pressed", String(crouchToggled));
         const pressed = crouchHeld || crouchToggled;
@@ -239,6 +257,10 @@
         }
         const code = button.dataset.key;
         if (!code) return;
+        if (code === "End") {
+            recenterView();
+            return;
+        }
         sendKey("keydown", code, true);
         sendKey("keyup", code, true);
     });
@@ -630,7 +652,7 @@
                         sendPendingTap();
                     } else if (pendingTap && tapDistance(pendingTap.point, point) <= doubleTapDistance) {
                         clearPendingTap();
-                        startForwardJump();
+                        recenterView();
                     } else {
                         sendPendingTap();
                         pendingTap = {
@@ -652,6 +674,7 @@
     }
 
     function reset() {
+        releaseRecenter();
         release();
         releaseCrouch();
         for (const code of remappedHeld.values()) sendKey("keyup", code);
