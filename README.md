@@ -8,12 +8,29 @@ The original game data is required and is not included.
 
 ## Web Demo Levels
 
-- [Main Menu](https://leweyg.github.io/OpenDE-Web/static/index.html)
-- [0_0: Training: Basics](https://leweyg.github.io/OpenDE-Web/static/index.html?level=training)
-- [0_1: Training: Combat](https://leweyg.github.io/OpenDE-Web/static/index.html?level=training_combat)
-- [0_2: Training: Stealth](https://leweyg.github.io/OpenDE-Web/static/index.html?level=training_final)
-- [1_0: New York City: Liberty Island](https://leweyg.github.io/OpenDE-Web/static/index.html?level=game)
-- [1_1: New York City: UNATCO Headquarters](https://leweyg.github.io/OpenDE-Web/static/index.html?level=unatco_hq)
+[Main Menu](https://leweyg.github.io/OpenDE-Web/static/index.html)
+
+<a href="https://leweyg.github.io/OpenDE-Web/static/index.html"><img src="static/screenshots/main-menu.jpg" alt="Main Menu screenshot" width="300"></a>
+
+[0_0: Training: Basics](https://leweyg.github.io/OpenDE-Web/static/index.html?level=training)
+
+<a href="https://leweyg.github.io/OpenDE-Web/static/index.html?level=training"><img src="static/screenshots/training.jpg" alt="0_0: Training: Basics screenshot" width="300"></a>
+
+[0_1: Training: Combat](https://leweyg.github.io/OpenDE-Web/static/index.html?level=training_combat)
+
+<a href="https://leweyg.github.io/OpenDE-Web/static/index.html?level=training_combat"><img src="static/screenshots/training_combat.jpg" alt="0_1: Training: Combat screenshot" width="300"></a>
+
+[0_2: Training: Stealth](https://leweyg.github.io/OpenDE-Web/static/index.html?level=training_final)
+
+<a href="https://leweyg.github.io/OpenDE-Web/static/index.html?level=training_final"><img src="static/screenshots/training_final.jpg" alt="0_2: Training: Stealth screenshot" width="300"></a>
+
+[1_0: New York City: Liberty Island](https://leweyg.github.io/OpenDE-Web/static/index.html?level=game)
+
+<a href="https://leweyg.github.io/OpenDE-Web/static/index.html?level=game"><img src="static/screenshots/game.jpg" alt="1_0: New York City: Liberty Island screenshot" width="300"></a>
+
+[1_1: New York City: UNATCO Headquarters](https://leweyg.github.io/OpenDE-Web/static/index.html?level=unatco_hq)
+
+<a href="https://leweyg.github.io/OpenDE-Web/static/index.html?level=unatco_hq"><img src="static/screenshots/unatco_hq.jpg" alt="1_1: New York City: UNATCO Headquarters screenshot" width="300"></a>
 
 ## Features
 
