@@ -4,6 +4,7 @@
 #include "engine/mesh.h"
 #include "engine/props_engine.h"
 #include "engine/props_fire.h"
+#include "render/render_device.h"
 
 #include <algorithm>
 #include <array>
@@ -274,6 +275,14 @@ namespace dx {
         std::vector<uint8_t> pixels;
         UPalette* palette = nullptr;
         bool started = false;
+        bool updating = false;
+        bool pixelsDirty = true;
+        bool deferRipplePixels = false;
+        bool rippleStepped = false;
+        bool ripplePixelsPending = false;
+        uint32_t updatePeriod = DynamicTextureUpdatePeriod;
+        uint32_t updatePhase = 0;
+        uint64_t lastUpdateFrame = 0;
         double lastTime = 0;
         float accumulator = 0;
         int32_t primeCurrent = 0;
@@ -548,14 +557,13 @@ namespace dx {
             case Kind::Wave:
                 if (usize >= 8 && vsize >= 8) {
                     waterRedrawDrops();
-                    calculateWater();
+                    stepWater();
                 }
                 break;
             case Kind::Wet:
                 if (!sourceBitmap.empty() && usize >= 8 && vsize >= 8) {
                     waterRedrawDrops();
-                    calculateWater();
-                    applyWetTexture();
+                    stepWater();
                 }
                 break;
             case Kind::Ice:
@@ -1330,14 +1338,57 @@ namespace dx {
             }
         }
 
+        bool canRenderRippleOnGpu() const
+        {
+            if (!valid || usize < 8 || vsize < 8) {
+                return false;
+            }
+            if (kind == Kind::Wave) {
+                return true;
+            }
+            if (kind != Kind::Wet || sourceBitmap.empty()) {
+                return false;
+            }
+            UTexture* source = cast<UTexture>(wettexture::SourceTexture(texture));
+            return kindOf(source) == Kind::None;
+        }
+
+        void stepWater()
+        {
+            rippleStepped = true;
+            ripplePixelsPending = deferRipplePixels;
+            if (deferRipplePixels) {
+                calculateWater<true, false>();
+            } else {
+                calculateWater<true, true>();
+                if (kind == Kind::Wet) {
+                    applyWetTexture();
+                }
+            }
+        }
+
+        void materializeRipplePixels()
+        {
+            if (ripplePixelsPending) {
+                calculateWater<false, true>();
+                if (kind == Kind::Wet) {
+                    applyWetTexture();
+                }
+                ripplePixelsPending = false;
+            }
+        }
+
+        template <bool Simulate, bool Render>
         void calculateWater()
         {
             int32_t xdim = usize / 2;
             int32_t ydim = vsize / 2;
             int32_t lines = ydim * 2;
-            waveParity++;
+            if constexpr (Simulate) {
+                waveParity++;
+            }
             auto cell = [&](int32_t line, int32_t x) -> uint8_t& {
-                return fields[static_cast<size_t>(((line + lines) % lines) * xdim + (x + xdim) % xdim)];
+                return fields[static_cast<size_t>((line & (lines - 1)) * xdim + (x & (xdim - 1)))];
             };
             const uint8_t* wave = fractal.wave + 512;
             const uint8_t* table = renderTable + 512;
@@ -1346,27 +1397,27 @@ namespace dx {
                 int32_t line = even ? y * 2 : y * 2 + 1;
                 int32_t base = even ? -3 : -2;
                 for (int32_t x = 0; x < xdim; x++) {
-                    int32_t a = cell(line - 1, x + base);
-                    int32_t c = cell(line - 1, x + base + 1);
                     int32_t e = cell(line - 1, x + base + 2);
                     int32_t g = cell(line - 1, x + base + 3);
-                    int32_t b = cell(line + 1, x + base);
-                    int32_t d = cell(line + 1, x + base + 1);
                     int32_t f = cell(line + 1, x + base + 2);
                     int32_t h = cell(line + 1, x + base + 3);
-                    uint8_t& dest = cell(line, x);
-                    dest = wave[(e + g + f + h) - (dest << 1)];
-                    int32_t ea = e - a;
-                    int32_t fb = f - b;
-                    int32_t gc = g - c;
-                    int32_t hd = h - d;
-                    int32_t row = even ? y * 2 - 1 : y * 2;
-                    int32_t column = even ? x * 2 - 1 : x * 2;
-                    int32_t right = (gc + hd) >> 1;
-                    pixel(row, column + 1) = table[right * 2];
-                    pixel(row + 1, column) = table[fb + hd];
-                    pixel(row, column) = table[right + ((fb + ea) >> 1)];
-                    pixel(row + 1, column + 1) = table[hd + hd];
+                    if constexpr (Simulate) {
+                        uint8_t& dest = cell(line, x);
+                        dest = wave[(e + g + f + h) - (dest << 1)];
+                    }
+                    if constexpr (Render) {
+                        int32_t ea = e - cell(line - 1, x + base);
+                        int32_t fb = f - cell(line + 1, x + base);
+                        int32_t gc = g - cell(line - 1, x + base + 1);
+                        int32_t hd = h - cell(line + 1, x + base + 1);
+                        int32_t row = even ? y * 2 - 1 : y * 2;
+                        int32_t column = even ? x * 2 - 1 : x * 2;
+                        int32_t right = (gc + hd) >> 1;
+                        pixel(row, column + 1) = table[right * 2];
+                        pixel(row + 1, column) = table[fb + hd];
+                        pixel(row, column) = table[right + ((fb + ea) >> 1)];
+                        pixel(row + 1, column + 1) = table[hd + hd];
+                    }
                 }
             }
         }
@@ -1465,6 +1516,7 @@ namespace dx {
     void ProceduralTextures::clear()
     {
         states.clear();
+        nextPhase = 0;
     }
 
     void ProceduralTextures::reset(UTexture* texture)
@@ -1477,16 +1529,31 @@ namespace dx {
         constantRate = rate;
     }
 
-    bool ProceduralTextures::update(UTexture* texture, double time, std::vector<uint8_t>& rgba, uint32_t& width, uint32_t& height)
+    ProceduralState& ProceduralTextures::updateState(UTexture* texture, double time, uint64_t frame, bool asSource, bool gpuRipple)
     {
         auto& slot = states[texture];
-        bool created = false;
         if (!slot) {
             slot = std::make_unique<ProceduralState>();
             slot->init(texture);
-            created = true;
+#ifdef __EMSCRIPTEN__
+            if (slot->kind == Kind::Wave || slot->kind == Kind::Wet) {
+                slot->updatePeriod = 5;
+            }
+#endif
+            slot->updatePhase = nextPhase++ % slot->updatePeriod;
         }
         ProceduralState& state = *slot;
+        if (!asSource) {
+            state.deferRipplePixels = gpuRipple && state.canRenderRippleOnGpu();
+        }
+        // A source that is never drawn gets its updates from its consumer's slot.
+        bool due = frame == 0 || (frame - state.lastUpdateFrame >= state.updatePeriod &&
+            (asSource || frame % state.updatePeriod == state.updatePhase));
+        if (state.updating || (state.started && (state.lastTime == time || !due))) {
+            return state;
+        }
+        state.updating = true;
+        state.lastUpdateFrame = frame;
         if (state.kind == Kind::Wet || state.kind == Kind::Ice) {
             UObject* sources[2] = { state.kind == Kind::Wet ? wettexture::SourceTexture(texture) : icetexture::SourceTexture(texture), state.kind == Kind::Ice ? icetexture::GlassTexture(texture) : nullptr };
             for (int i = 0; i < 2; i++) {
@@ -1494,24 +1561,36 @@ namespace dx {
                 if (!source || source == texture || !isProcedural(source)) {
                     continue;
                 }
-                std::vector<uint8_t> scratch;
-                uint32_t sourceWidth = 0;
-                uint32_t sourceHeight = 0;
-                update(source, time, scratch, sourceWidth, sourceHeight);
-                const ProceduralState& sourceState = *states[source];
+                ProceduralState& sourceState = updateState(source, time, frame, true);
+                sourceState.materializeRipplePixels();
                 state.refreshBitmap(i == 0 ? state.sourceBitmap : state.glassBitmap, sourceState.pixels, sourceState.usize, sourceState.vsize, state.kind == Kind::Wet);
             }
         }
-        bool changed = state.tick(time, constantRate);
-        if (!changed && !created) {
+        if (state.tick(time, constantRate)) {
+            state.pixelsDirty = true;
+        }
+        state.updating = false;
+        return state;
+    }
+
+    bool ProceduralTextures::update(UTexture* texture, double time, std::vector<uint8_t>& rgba, uint32_t& width, uint32_t& height, uint64_t frame, RippleFrame* ripple)
+    {
+        ProceduralState& state = updateState(texture, time, frame, false, ripple != nullptr);
+        if (!state.pixelsDirty) {
             return false;
         }
+        state.pixelsDirty = false;
 
         width = static_cast<uint32_t>(state.usize);
         height = static_cast<uint32_t>(state.vsize);
-        rgba.resize(state.pixels.size() * 4);
         UPalette* palette = state.palette;
         const uint32_t* colors = palette && palette->colors.size() >= 256 ? palette->colors.data() : nullptr;
+        if (ripple && state.deferRipplePixels && state.rippleStepped) {
+            *ripple = { state.fields.data(), state.renderTable, state.sourceBitmap.empty() ? nullptr : state.sourceBitmap.data(), colors, (state.waveParity & 1) == 0 };
+            return true;
+        }
+        state.materializeRipplePixels();
+        rgba.resize(state.pixels.size() * 4);
         for (size_t i = 0; i < state.pixels.size(); i++) {
             uint8_t index = state.pixels[i];
             uint32_t color = colors ? colors[index] : (0xff000000u | index * 0x010101u);

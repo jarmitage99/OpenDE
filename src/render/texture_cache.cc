@@ -5,13 +5,36 @@
 
 #include <glad/gl.h>
 
+#ifdef __EMSCRIPTEN__
+#include "render/gl_shader.h"
+#include <emscripten.h>
+#endif
+
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <exception>
 #include <vector>
 
 namespace dx {
     namespace {
+#ifdef __EMSCRIPTEN__
+        EM_JS(void, uploadProceduralPixels, (GLenum target, GLsizei width, GLsizei height, GLenum format, GLenum type, const void* data), {
+            GLctx.texSubImage2D(target, 0, 0, 0, width, height, format, type, HEAPU8, data >>> 0);
+        });
+
+        void createRippleInput(uint32_t& texture, GLint internalFormat, GLenum format, int32_t width, int32_t height, const void* data)
+        {
+            glGenTextures(1, &texture);
+            glBindTexture(GL_TEXTURE_2D, texture);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+            glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, width, height, 0, format, GL_UNSIGNED_BYTE, data);
+        }
+#endif
+
         void setParameters(bool smooth, int32_t levels, bool trilinear, float anisotropy)
         {
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, levels - 1);
@@ -59,7 +82,15 @@ namespace dx {
         }
         maskedTextures.clear();
         animations.clear();
-        proceduralFrames.clear();
+        for (auto& [texture, entry] : proceduralTextures) {
+#ifdef __EMSCRIPTEN__
+            entry.clearRippleInputs();
+#endif
+            for (GLTextureInfo& buffer : entry.buffers) {
+                glDeleteTextures(1, &buffer.id);
+            }
+        }
+        proceduralTextures.clear();
         procedural.clear();
         replacements.rescan();
     }
@@ -67,6 +98,13 @@ namespace dx {
     void TextureCache::resetProcedural(UTexture* texture)
     {
         procedural.reset(texture);
+#ifdef __EMSCRIPTEN__
+        auto entry = proceduralTextures.find(texture);
+        if (entry != proceduralTextures.end()) {
+            entry->second.clearRippleInputs();
+            entry->second.lastFrame = 0;
+        }
+#endif
     }
 
     uint32_t TextureCache::white()
@@ -139,40 +177,15 @@ namespace dx {
         }
         objects::ensureLoaded(texture);
         auto it = textures.find(texture);
-        if (it != textures.end() && !it->second.procedural) {
+        if (it != textures.end()) {
             return it->second.id ? &it->second : nullptr;
         }
-        bool isProcedural = it != textures.end() ? it->second.procedural : ProceduralTextures::isProcedural(texture);
-        if (isProcedural) {
-            uint64_t& lastFrame = proceduralFrames[texture];
-            if (it != textures.end() && lastFrame == frame) {
-                return &it->second;
-            }
-            lastFrame = frame;
-            std::vector<uint8_t> rgba;
-            uint32_t width = 0;
-            uint32_t height = 0;
-            bool changed = procedural.update(texture, time, rgba, width, height);
-            if (it != textures.end() && !changed) {
-                return &it->second;
-            }
-            if (rgba.empty()) {
-                return it != textures.end() ? &it->second : nullptr;
-            }
-            GLTextureInfo& info = textures[texture];
-            info.procedural = true;
-            if (!info.id) {
-                glGenTextures(1, &info.id);
-            }
-            info.width = width;
-            info.height = height;
-            info.masked = texture->masked();
-            glBindTexture(GL_TEXTURE_2D, info.id);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, static_cast<GLsizei>(width), static_cast<GLsizei>(height), 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
-            info.smooth = true;
-            info.levels = 1;
-            setParameters(true, 1, trilinear, anisotropy);
-            return &info;
+        auto dynamic = proceduralTextures.find(texture);
+        if (dynamic != proceduralTextures.end()) {
+            return getProcedural(texture, dynamic->second);
+        }
+        if (ProceduralTextures::isProcedural(texture)) {
+            return getProcedural(texture, proceduralTextures[texture]);
         }
 
         GLTextureInfo& info = textures[texture];
@@ -181,6 +194,113 @@ namespace dx {
         }
         return upload(texture, info, texture->masked()) ? &info : nullptr;
     }
+
+    const GLTextureInfo* TextureCache::getProcedural(UTexture* texture, ProceduralTexture& entry)
+    {
+        const GLTextureInfo& current = entry.buffers[entry.front];
+        if (current.id && entry.lastFrame == frame) {
+            return &current;
+        }
+        entry.lastFrame = frame;
+        uint32_t width = 0;
+        uint32_t height = 0;
+#ifdef __EMSCRIPTEN__
+        RippleFrame ripple;
+        if (!procedural.update(texture, time, proceduralPixels, width, height, frame, &ripple) || (!ripple.heights && proceduralPixels.empty())) {
+#else
+        if (!procedural.update(texture, time, proceduralPixels, width, height, frame) || proceduralPixels.empty()) {
+#endif
+            return current.id ? &current : nullptr;
+        }
+        uint32_t next = entry.front;
+#ifdef __EMSCRIPTEN__
+        if (current.id) {
+            next ^= 1;
+        }
+#endif
+        GLTextureInfo& info = entry.buffers[next];
+        const bool reuseStorage = info.id && info.width == width && info.height == height;
+        if (!info.id) {
+            glGenTextures(1, &info.id);
+        }
+        const auto uploadWidth = static_cast<GLsizei>(width);
+        const auto uploadHeight = static_cast<GLsizei>(height);
+        glBindTexture(GL_TEXTURE_2D, info.id);
+#ifdef __EMSCRIPTEN__
+        if (ripple.heights) {
+            if (!reuseStorage) {
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, uploadWidth, uploadHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+                setParameters(true, 1, trilinear, anisotropy);
+            }
+            renderRipple(entry, next, ripple, uploadWidth, uploadHeight);
+        } else if (reuseStorage) {
+            uploadProceduralPixels(GL_TEXTURE_2D, uploadWidth, uploadHeight, GL_RGBA, GL_UNSIGNED_BYTE, proceduralPixels.data());
+#else
+        if (reuseStorage) {
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, uploadWidth, uploadHeight, GL_RGBA, GL_UNSIGNED_BYTE, proceduralPixels.data());
+#endif
+        } else {
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, uploadWidth, uploadHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, proceduralPixels.data());
+            setParameters(true, 1, trilinear, anisotropy);
+        }
+        info.width = width;
+        info.height = height;
+        info.masked = texture->masked();
+        info.procedural = true;
+        info.smooth = true;
+#ifdef __EMSCRIPTEN__
+        entry.front = next;
+#endif
+        return &info;
+    }
+
+#ifdef __EMSCRIPTEN__
+    void TextureCache::ProceduralTexture::clearRippleInputs()
+    {
+        glDeleteTextures(2, heights);
+        glDeleteTextures(1, &lookup);
+        glDeleteTextures(1, &source);
+        heights[0] = 0;
+        heights[1] = 0;
+        lookup = 0;
+        source = 0;
+    }
+
+    void TextureCache::renderRipple(ProceduralTexture& entry, uint32_t next, const RippleFrame& ripple, int32_t width, int32_t height)
+    {
+        if (!ripplePass) {
+            ripplePass = std::make_unique<RipplePass>();
+        }
+        if (!entry.lookup) {
+            // The first row is the RGBA palette. The other four rows store the slope table.
+            std::array<uint8_t, 256 * 5 * 4> lookup {};
+            for (size_t i = 0; i < 256; i++) {
+                uint32_t index = static_cast<uint32_t>(i);
+                uint32_t color = ripple.palette ? ripple.palette[i] : index * 0x010101u;
+                lookup[i * 4] = static_cast<uint8_t>(color);
+                lookup[i * 4 + 1] = static_cast<uint8_t>(color >> 8);
+                lookup[i * 4 + 2] = static_cast<uint8_t>(color >> 16);
+                lookup[i * 4 + 3] = i == 0 ? 0 : 255;
+            }
+            for (size_t i = 0; i < 1024; i++) {
+                lookup[(256 + i) * 4] = ripple.slopes[i];
+            }
+            createRippleInput(entry.lookup, GL_RGBA8, GL_RGBA, 256, 5, lookup.data());
+            if (ripple.source) {
+                createRippleInput(entry.source, GL_R8, GL_RED, width, height, ripple.source);
+            }
+        }
+        uint32_t& heights = entry.heights[next];
+        if (!heights) {
+            createRippleInput(heights, GL_R8, GL_RED, width / 2, height, ripple.heights);
+        } else {
+            glBindTexture(GL_TEXTURE_2D, heights);
+            uploadProceduralPixels(GL_TEXTURE_2D, width / 2, height, GL_RED, GL_UNSIGNED_BYTE, ripple.heights);
+        }
+        ripplePass->render(entry.buffers[next].id, heights, entry.lookup, entry.source, width, height, ripple.even);
+        glBindTexture(GL_TEXTURE_2D, entry.buffers[next].id);
+    }
+#endif
 
     const GLTextureInfo* TextureCache::getMasked(UTexture* texture)
     {

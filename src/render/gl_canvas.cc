@@ -27,7 +27,8 @@ namespace dx {
         viewWidth = std::max(w, 1);
         viewHeight = std::max(h, 1);
         vertices.clear();
-        clipping = false;
+        batches.clear();
+        clipRect.reset();
     }
 
     float GLCanvas::width() const
@@ -51,15 +52,32 @@ namespace dx {
         shader.setTint(1, 1, 1, 1);
         glDisable(GL_DEPTH_TEST);
         glDisable(GL_CULL_FACE);
-        if (clipping) {
+        shader.upload(vertices);
+        for (size_t i = 0; i < batches.size(); i++) {
+            int32_t end = i + 1 < batches.size() ? batches[i + 1].first : static_cast<int32_t>(vertices.size());
+            drawBatch(batches[i], end - batches[i].first);
+        }
+        glBindSampler(0, 0);
+        vertices.clear();
+        batches.clear();
+        glDisable(GL_SCISSOR_TEST);
+        glDepthMask(GL_TRUE);
+        glDisable(GL_BLEND);
+    }
+
+    void GLCanvas::drawBatch(const DrawBatch& batch, int32_t count)
+    {
+        const DrawState& state = batch.state;
+        if (state.clip) {
+            const ClipRect& clip = *state.clip;
             glEnable(GL_SCISSOR_TEST);
-            glScissor(clipRect[0], viewHeight - clipRect[1] - clipRect[3], clipRect[2], clipRect[3]);
+            glScissor(clip[0], viewHeight - clip[1] - clip[3], clip[2], clip[3]);
         } else {
             glDisable(GL_SCISSOR_TEST);
         }
         int32_t flags = SHADER_Textured;
         BlendMode mode = BlendMode::Alpha;
-        switch (currentStyle) {
+        switch (state.style) {
         case BlendStyle::Masked:
             flags |= SHADER_AlphaTest;
             mode = BlendMode::Masked;
@@ -69,62 +87,42 @@ namespace dx {
             break;
         case BlendStyle::Modulated:
             mode = BlendMode::Modulated;
-            if (currentMasked) {
+            if (state.masked) {
                 flags |= SHADER_AlphaTest;
             }
             break;
         case BlendStyle::None:
         case BlendStyle::Normal:
-            mode = currentMasked ? BlendMode::Masked : (currentTexture == textures.white() ? BlendMode::Alpha : BlendMode::Opaque);
-            if (currentMasked) {
+            mode = state.masked ? BlendMode::Masked : (state.texture == textures.white() ? BlendMode::Alpha : BlendMode::Opaque);
+            if (state.masked) {
                 flags |= SHADER_AlphaTest;
             }
             break;
         }
         shader.setFlags(flags);
         shader.setBlend(mode);
-        shader.bindTexture(currentTexture);
-        glBindSampler(0, currentSmooth ? 0 : nearestSampler);
-        shader.draw(vertices, currentPrimitive);
-        glBindSampler(0, 0);
-        vertices.clear();
-        glDisable(GL_SCISSOR_TEST);
-        glDepthMask(GL_TRUE);
-        glDisable(GL_BLEND);
+        shader.bindTexture(state.texture);
+        glBindSampler(0, state.smooth ? 0 : nearestSampler);
+        shader.drawRange(batch.first, count, state.primitive);
     }
 
     void GLCanvas::setClip(float x, float y, float w, float h)
     {
-        int rect[4] = { static_cast<int>(std::floor(x)), static_cast<int>(std::floor(y)), static_cast<int>(std::ceil(w)), static_cast<int>(std::ceil(h)) };
-        rect[2] = std::max(rect[2], 0);
-        rect[3] = std::max(rect[3], 0);
-        if (clipping && std::equal(rect, rect + 4, clipRect)) {
-            return;
-        }
-        flush();
-        clipping = true;
-        std::copy(rect, rect + 4, clipRect);
+        clipRect = ClipRect { static_cast<int>(std::floor(x)), static_cast<int>(std::floor(y)),
+            std::max(static_cast<int>(std::ceil(w)), 0), std::max(static_cast<int>(std::ceil(h)), 0) };
     }
 
     void GLCanvas::clearClip()
     {
-        if (!clipping) {
-            return;
-        }
-        flush();
-        clipping = false;
+        clipRect.reset();
     }
 
     void GLCanvas::prepare(uint32_t texture, BlendStyle style, bool masked, bool smooth, uint32_t primitive)
     {
-        if (!vertices.empty() && (texture != currentTexture || style != currentStyle || masked != currentMasked || smooth != currentSmooth || primitive != currentPrimitive)) {
-            flush();
+        DrawState state { texture, style, masked, smooth, primitive, clipRect };
+        if (batches.empty() || batches.back().state != state) {
+            batches.push_back({ state, static_cast<int32_t>(vertices.size()) });
         }
-        currentTexture = texture;
-        currentStyle = style;
-        currentMasked = masked;
-        currentSmooth = smooth;
-        currentPrimitive = primitive;
     }
 
     void GLCanvas::drawTile(UTexture* texture, float x, float y, float w, float h, float u, float v, float ul, float vl, LinearColor color, BlendStyle style, bool smooth)
