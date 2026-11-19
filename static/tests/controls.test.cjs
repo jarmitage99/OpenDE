@@ -158,14 +158,16 @@ test("saved native toggle mode is disabled without altering other player setting
     assert.match(game.settings, /V=PrevBeltItem/);
 });
 
-test("double-tap holds forward and jump together without firing or cycling", async () => {
+test("forward jump leads with movement, releases jump first, and cancels on blur", async () => {
     const game = createGame();
     game.tap(0);
     game.tap(100);
     const presses = [["keydown", "KeyW"], ["keydown", "Space"]];
-    const releases = [["keyup", "KeyW"], ["keyup", "Space"]];
+    const releases = [["keyup", "Space"], ["keyup", "KeyW"]];
+    assert.deepEqual(game.keyEvents, presses.slice(0, 1));
+    await new Promise(resolve => setTimeout(resolve, 100));
     assert.deepEqual(game.keyEvents, presses);
-    await new Promise(resolve => setTimeout(resolve, 275));
+    await new Promise(resolve => setTimeout(resolve, 350));
     assert.deepEqual(game.keyEvents, [...presses, ...releases]);
     assert.deepEqual(game.touchEvents, []);
     assert.deepEqual(game.actions, []);
@@ -173,7 +175,10 @@ test("double-tap holds forward and jump together without firing or cycling", asy
     game.tap(400);
     game.tap(500);
     game.blur();
-    assert.deepEqual(game.keyEvents.slice(-4), [...presses, ...releases]);
+    assert.deepEqual(game.keyEvents.slice(-2), [["keydown", "KeyW"], ["keyup", "KeyW"]]);
+    const eventCount = game.keyEvents.length;
+    await new Promise(resolve => setTimeout(resolve, 100));
+    assert.equal(game.keyEvents.length, eventCount);
 });
 
 test("a stationary hold right-clicks once before release and cancels cleanly", async () => {

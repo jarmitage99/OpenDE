@@ -2,6 +2,8 @@
     const canvas = document.getElementById("canvas");
     const shortcuts = document.getElementById("game-shortcuts");
     const crouchShortcut = document.getElementById("shortcut-crouch");
+    const touchLaptop = document.getElementById("touch-laptop");
+    const touchLaptopEnabled = () => touchLaptop?.checked ?? true;
     // Increase this for longer steps per wheel tick.
     const holdMilliseconds = 180;
     const turnSpeed = 50; // Original turn speed is 150.
@@ -12,7 +14,10 @@
     const touchHoldMilliseconds = 350;
     const doubleTapMilliseconds = 250;
     const doubleTapDistance = 32;
-    const forwardJumpMilliseconds = 250;
+    // Jump+Fwd phases: run up, hold jump, then keep moving after releasing jump.
+    const forwardJumpLeadMilliseconds = 80;
+    const forwardJumpHoldMilliseconds = 220;
+    const forwardJumpTailMilliseconds = 120;
     const keys = {
         KeyW: { key: "w", code: "KeyW", keyCode: 87, which: 87 },
         KeyA: { key: "a", code: "KeyA", keyCode: 65, which: 65 },
@@ -44,7 +49,7 @@
     const cycleKeysHeld = new Set();
     const physicalKeys = new Set();
     const syntheticEvents = new WeakSet();
-    let touchMode = window.matchMedia?.("(hover: none) and (pointer: coarse)").matches ?? false;
+    let touchMode = touchLaptopEnabled() && (window.matchMedia?.("(hover: none) and (pointer: coarse)").matches ?? false);
     let ready = false;
     let crouchHeld = false;
     let crouchToggled = false;
@@ -65,6 +70,7 @@
     }
 
     function enterTouchMode() {
+        if (!touchLaptopEnabled()) return;
         touchMode = true;
         if (document.pointerLockElement === canvas) document.exitPointerLock?.();
     }
@@ -214,11 +220,25 @@
         if (event.pointerType === "touch") enterTouchMode();
     });
     // Using the buttons by pointer should keep canvas focus and held inputs.
-    shortcuts?.addEventListener("mousedown", event => event.preventDefault());
+    shortcuts?.addEventListener("mousedown", event => {
+        if (event.target.closest("button")) event.preventDefault();
+    });
     shortcuts?.addEventListener("click", event => {
-        const code = event.target.closest("button[data-key]")?.dataset.key;
-        if (!ready || !code) return;
+        const button = event.target.closest("button");
+        if (!ready || !button) return;
         if (event.detail) canvas.focus({ preventScroll: true });
+        if (button.dataset.action === "jump-forward") {
+            startForwardJump();
+            updateTouchKeys();
+            return;
+        }
+        if (button.dataset.mouse === "2") {
+            sendMouse("mousedown", event, 2);
+            sendMouse("mouseup", event, 2);
+            return;
+        }
+        const code = button.dataset.key;
+        if (!code) return;
         sendKey("keydown", code, true);
         sendKey("keyup", code, true);
     });
@@ -231,7 +251,7 @@
 
     // Capture before SDL so wheel movement replaces the game's wheel binding.
     window.addEventListener("wheel", event => {
-        if (syntheticEvents.has(event) || !ready || event.ctrlKey || (!event.deltaY && !event.deltaX)) return;
+        if (!touchLaptopEnabled() || syntheticEvents.has(event) || !ready || event.ctrlKey || (!event.deltaY && !event.deltaX)) return;
         if (event.target !== canvas && document.pointerLockElement !== canvas) return;
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -367,7 +387,7 @@
     }
 
     window.addEventListener("mousedown", event => {
-        if (!ready || syntheticEvents.has(event) || !overGame(event)) return;
+        if (!touchLaptopEnabled() || !ready || syntheticEvents.has(event) || !overGame(event)) return;
         if (event.sourceCapabilities?.firesTouchEvents) {
             event.stopImmediatePropagation();
             return;
@@ -395,7 +415,7 @@
     }, true);
 
     window.addEventListener("mouseup", event => {
-        if (!ready || syntheticEvents.has(event)) return;
+        if (!touchLaptopEnabled() || !ready || syntheticEvents.has(event)) return;
         if (overGame(event) && event.sourceCapabilities?.firesTouchEvents) {
             event.stopImmediatePropagation();
             return;
@@ -419,7 +439,7 @@
 
     // Some macOS/browser combinations announce the secondary gesture here first.
     window.addEventListener("contextmenu", event => {
-        if (ready && overGame(event)) secondaryPress();
+        if (touchLaptopEnabled() && ready && overGame(event)) secondaryPress();
     }, true);
 
     const fingers = new Map();
@@ -430,6 +450,7 @@
     let soloLook = false;
     let pendingTap = null;
     let forwardJumpTimer = null;
+    let forwardJumpHeld = false;
 
     function setTouchKeys(next) {
         const scrollHolds = code => Object.values(scrollAxes).some(axis => axis.pressed && axis.code === code);
@@ -464,7 +485,7 @@
         }
         if (forwardJumpTimer !== null) {
             next.add("KeyW");
-            next.add("Space");
+            if (forwardJumpHeld) next.add("Space");
         }
         setTouchKeys(next);
     }
@@ -534,6 +555,7 @@
         clearPendingTap();
         clearTimeout(forwardJumpTimer);
         forwardJumpTimer = null;
+        forwardJumpHeld = false;
         fingers.clear();
         updateTouchRoles();
         updateTouchKeys();
@@ -541,14 +563,23 @@
 
     function startForwardJump() {
         clearTimeout(forwardJumpTimer);
+        forwardJumpHeld = false;
         forwardJumpTimer = setTimeout(() => {
-            forwardJumpTimer = null;
+            forwardJumpHeld = true;
             updateTouchKeys();
-        }, forwardJumpMilliseconds);
+            forwardJumpTimer = setTimeout(() => {
+                forwardJumpHeld = false;
+                updateTouchKeys();
+                forwardJumpTimer = setTimeout(() => {
+                    forwardJumpTimer = null;
+                    updateTouchKeys();
+                }, forwardJumpTailMilliseconds);
+            }, forwardJumpHoldMilliseconds);
+        }, forwardJumpLeadMilliseconds);
     }
 
     function handleTouch(event) {
-        if (!ready || syntheticEvents.has(event)) return;
+        if (!touchLaptopEnabled() || !ready || syntheticEvents.has(event)) return;
         event.preventDefault();
         // Intercept before SDL. The document's capture listener can still unlock audio.
         event.stopImmediatePropagation();
@@ -633,6 +664,13 @@
         suppressLeftUntil = 0;
     }
     window.addEventListener("blur", reset);
+    touchLaptop?.addEventListener("change", () => {
+        reset();
+        touchMode = false;
+        if (touchLaptopEnabled() && window.matchMedia?.("(hover: none) and (pointer: coarse)").matches) {
+            enterTouchMode();
+        }
+    });
     window.addEventListener("pagehide", reset);
     canvas.addEventListener("blur", reset);
     document.addEventListener("visibilitychange", () => {
