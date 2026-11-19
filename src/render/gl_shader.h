@@ -3,6 +3,10 @@
 #include "render/gl_math.h"
 #include "render/render_device.h"
 
+#ifdef __EMSCRIPTEN__
+#include <glad/gl.h>
+#endif
+
 #include <cstdint>
 #include <vector>
 
@@ -30,7 +34,12 @@ namespace dx {
         void bindLightmap(uint32_t texture);
         void draw(const std::vector<GLVertex>& vertices, uint32_t primitive);
         void upload(const std::vector<GLVertex>& vertices);
-        void drawRange(int32_t first, int32_t count);
+        void drawRange(int32_t first, int32_t count, uint32_t primitive);
+#ifdef __EMSCRIPTEN__
+        void beginVertexFrame();
+        VertexRange uploadVertexBatch(const std::vector<GLVertex>& vertices);
+        void endVertexFrame();
+#endif
         void bindStatic(uint32_t vao);
         void drawStatic(uint32_t vao, int32_t first, int32_t count);
         void drawStaticRanges(uint32_t vao, const int32_t* firsts, const int32_t* counts, int32_t ranges);
@@ -72,7 +81,6 @@ namespace dx {
         };
 
         void setupAttributes();
-        int32_t stream(const std::vector<GLVertex>& vertices);
         void select(int32_t index);
         void sendState();
 
@@ -81,12 +89,51 @@ namespace dx {
         bool stale[2] = {};
         int32_t current = 0;
         State state;
+#ifdef __EMSCRIPTEN__
+        struct VertexPage {
+            uint32_t vao = 0;
+            uint32_t buffer = 0;
+            size_t capacity = 0;
+            size_t offset = 0;
+        };
+
+        struct VertexFrame {
+            std::vector<VertexPage> pages;
+            GLsync fence = nullptr;
+        };
+
+        VertexFrame vertexFrames[2];
+        size_t vertexFrameIndex = 0;
+        VertexRange uploadedVertices {};
+#else
+        int32_t stream(const std::vector<GLVertex>& vertices);
         uint32_t streamVao = 0;
         uint32_t streamVbo = 0;
         size_t streamCapacity = 0;
         size_t streamOffset = 0;
         int32_t uploadBase = 0;
+#endif
     };
+
+#ifdef __EMSCRIPTEN__
+    class RipplePass {
+    public:
+        RipplePass();
+        ~RipplePass();
+        RipplePass(const RipplePass&) = delete;
+        RipplePass& operator=(const RipplePass&) = delete;
+
+        void render(uint32_t output, uint32_t heights, uint32_t lookup, uint32_t source, int32_t width, int32_t height, bool even);
+
+    private:
+        uint32_t program = 0;
+        uint32_t framebuffer = 0;
+        uint32_t vao = 0;
+        int32_t sizeLocation = -1;
+        int32_t parityLocation = -1;
+        int32_t wetLocation = -1;
+    };
+#endif
 
     class GammaPass {
     public:
