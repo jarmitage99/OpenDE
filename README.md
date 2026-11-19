@@ -6,6 +6,15 @@ new C++ engine built on SDL2 and OpenGL 3.3.
 
 The original game data is required and is not included.
 
+## Web Demo Levels
+
+- [Main Menu](https://leweyg.github.io/OpenDE-Web/static/index.html)
+- [0_0: Training: Basics](https://leweyg.github.io/OpenDE-Web/static/index.html?level=training)
+- [0_1: Training: Combat](https://leweyg.github.io/OpenDE-Web/static/index.html?level=training_combat)
+- [0_2: Training: Stealth](https://leweyg.github.io/OpenDE-Web/static/index.html?level=training_final)
+- [1_0: New York City: Liberty Island](https://leweyg.github.io/OpenDE-Web/static/index.html?level=game)
+- [1_1: New York City: UNATCO Headquarters](https://leweyg.github.io/OpenDE-Web/static/index.html?level=unatco_hq)
+
 ## Features
 
 - Runs natively on Linux, Windows, macOS and in the browser
