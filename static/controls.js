@@ -4,6 +4,13 @@
     const crouchShortcut = document.getElementById("shortcut-crouch");
     const touchLaptop = document.getElementById("touch-laptop");
     const touchLaptopEnabled = () => touchLaptop?.checked ?? true;
+    function updateShortcutHints() {
+        const mode = touchLaptopEnabled() ? "web" : "classic";
+        for (const hint of shortcuts?.querySelectorAll(".shortcut-hint[data-web]") ?? []) {
+            hint.textContent = `(${hint.dataset[mode]})`;
+        }
+    }
+    updateShortcutHints();
     // Increase this for longer steps per wheel tick.
     const holdMilliseconds = 180;
     const turnSpeed = 50; // Original turn speed is 150.
@@ -29,6 +36,7 @@
         KeyC: { key: "c", code: "KeyC", keyCode: 67, which: 67 },
         KeyX: { key: "x", code: "KeyX", keyCode: 88, which: 88 },
         KeyF: { key: "f", code: "KeyF", keyCode: 70, which: 70 },
+        KeyV: { key: "v", code: "KeyV", keyCode: 86, which: 86 },
         KeyR: { key: "r", code: "KeyR", keyCode: 82, which: 82 },
         Escape: { key: "Escape", code: "Escape", keyCode: 27, which: 27 },
         End: { key: "End", code: "End", keyCode: 35, which: 35 },
@@ -36,18 +44,20 @@
         Backspace: { key: "Backspace", code: "Backspace", keyCode: 8, which: 8 },
         Tab: { key: "Tab", code: "Tab", keyCode: 9, which: 9 },
         KeyI: { key: "i", code: "KeyI", keyCode: 73, which: 73 },
+        Semicolon: { key: ";", code: "Semicolon", keyCode: 186, which: 186 },
         BracketLeft: { key: "[", code: "BracketLeft", keyCode: 219, which: 219 },
         Delete: { key: "Delete", code: "Delete", keyCode: 46, which: 46 },
         PageDown: { key: "PageDown", code: "PageDown", keyCode: 34, which: 34 }
     };
     const movementKeys = new Set(["KeyW", "KeyA", "KeyS", "KeyD"]);
     const touchKeys = new Set();
+    const helperKeys = new Set();
     const touchLookKeys = [
         ["KeyZ", "KeyC", "Delete", "PageDown"]
     ];
     // Targets are the actions bound in the shipped demo's User.ini.
     // Use the shipped letter binding; function-key translation varies in the web build.
-    const remappedKeys = { KeyT: "Tab", KeyZ: "BracketLeft", Tab: "KeyI" };
+    const remappedKeys = { KeyT: "Tab", KeyZ: "BracketLeft", KeyR: "Semicolon", KeyY: "Backspace", Tab: "KeyI" };
     const remappedHeld = new Map();
     const cycleKeysHeld = new Set();
     const physicalKeys = new Set();
@@ -92,36 +102,74 @@
     Module.onRuntimeInitialized = () => {
         const path = "/home/web_user/.local/share/deusex/User.ini";
         const source = FS.analyzePath(path).exists ? path : "/game/System/User.ini";
-        const bindings = { End: "CenterView", F: "NextBeltItem", T: "DropItem", V: "PrevBeltItem", Tab: "DropItem", X: "Duck", Y: "PutInHand", R: "ReloadWeapon", I: "ShowInventoryWindow", F1: "ShowInventoryWindow", MouseWheelDown: "NextBeltItem", MouseWheelUp: "PrevBeltItem" };
-        const remaining = new Set(Object.keys(bindings));
+        const defaults = FS.readFile("/game/System/DefUser.ini", { encoding: "utf8" });
+        // Parse complete lines: \s in a section regex can consume CRLF
+        // boundaries and join a following header onto the previous binding.
+        // Normalize lone CR too, repairing files written by the old rewrite.
+        const parseSections = text => {
+            const sections = [];
+            let current = { name: "", lines: [] };
+            sections.push(current);
+            for (const line of text.replace(/\r\n?/g, "\n").split("\n")) {
+                const header = line.match(/^[ \t]*\[([^\]]+)\][ \t]*$/);
+                if (header) {
+                    current = { name: header[1], lines: [] };
+                    sections.push(current);
+                } else {
+                    current.lines.push(line);
+                }
+            }
+            return sections;
+        };
+        const defaultSections = parseSections(defaults);
+        const defaultInput = defaultSections.find(section => section.name.toLowerCase() === "engine.input");
+        if (!defaultInput) throw new Error("Packaged defaults are missing Engine.Input");
         const settingsText = FS.readFile(source, { encoding: "utf8" });
+        const sections = parseSections(settingsText);
+        const originalInput = defaultInput.lines.join("\n");
+        // The engine always gets one stable native binding map. Mode-specific
+        // keyboard, mouse and touch translation happens only in this JS layer.
+        let restoredInput = false;
+        const restoredSections = sections.filter(section => {
+            if (section.name.toLowerCase() !== "engine.input") return true;
+            if (restoredInput) return false;
+            section.lines = [...defaultInput.lines];
+            restoredInput = true;
+            return true;
+        });
+        if (!restoredInput) restoredSections.push({ name: "Engine.Input", lines: [...defaultInput.lines] });
+        // A prior engine save may already have discarded the malformed header.
+        // Restore missing player settings from the packaged defaults in that case.
+        for (const name of ["engine.playerpawn", "deusex.deusexplayer"]) {
+            if (restoredSections.some(section => section.name.toLowerCase() === name)) continue;
+            const fallback = defaultSections.find(section => section.name.toLowerCase() === name);
+            if (fallback) restoredSections.push({ name: fallback.name, lines: [...fallback.lines] });
+        }
         const newline = settingsText.includes("\r\n") ? "\r\n" : "\n";
         let inInput = false;
-        const lines = settingsText.split(/\r?\n/);
-        // Use unassigned keypad keys for independent slow and fast look axes.
-        // Leave saved keypad bindings alone and fall back to the original controls as needed.
-        if (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0) {
-            const input = settingsText.split(/^\s*\[Engine\.Input\]\s*$/im)[1]?.split(/^\s*\[/m)[0] ?? "";
-            const keypad = new Map(Array.from(input.matchAll(/^\s*NumPad([0-7])[^\S\r\n]*=([^\r\n]*)/gim),
-                match => [Number(match[1]), match[2].trim()]));
-            const axisSpeeds = [
-                ["aBaseX", -turnSpeed], ["aBaseX", turnSpeed],
-                ["aLookUp", 35], ["aLookUp", -35]
-            ];
-            for (let tier = 0; tier < 2; tier++) {
-                touchLookKeys[tier] = axisSpeeds.map(([axis, speed], direction) => {
-                    const digit = tier * 4 + direction;
-                    const code = `Numpad${digit}`;
-                    const iniKey = `NumPad${digit}`;
-                    const command = `Axis ${axis} Speed=${speed * (tier + 1)}.0`;
-                    if (keypad.get(digit) && keypad.get(digit) !== command) return touchLookKeys[0][direction];
-                    keys[code] = { key: String(digit), code, keyCode: 96 + digit, which: 96 + digit, location: 3 };
-                    bindings[iniKey] = command;
-                    remaining.add(iniKey);
-                    return code;
-                });
-            }
+        const lines = restoredSections.flatMap(section => section.name
+            ? [`[${section.name}]`, ...section.lines] : section.lines);
+        const bindings = {};
+        // Unbound keypad keys carry web-only slow look axes; native C/Z retain
+        // the original turning speeds. Ignore these helper keys in Classic mode.
+        const keypad = new Map(Array.from(originalInput.matchAll(/^\s*NumPad([0-7])[^\S\r\n]*=([^\r\n]*)/gim),
+            match => [Number(match[1]), match[2].trim()]));
+        const axisSpeeds = [
+            ["aBaseX", -turnSpeed], ["aBaseX", turnSpeed],
+            ["aLookUp", 35], ["aLookUp", -35]
+        ];
+        for (let tier = 0; tier < 2; tier++) {
+            touchLookKeys[tier] = axisSpeeds.map(([axis, speed], direction) => {
+                const digit = tier * 4 + direction;
+                const code = `Numpad${digit}`;
+                if (keypad.get(digit)) return touchLookKeys[0][direction];
+                keys[code] = { key: String(digit), code, keyCode: 96 + digit, which: 96 + digit, location: 3 };
+                helperKeys.add(code);
+                bindings[`NumPad${digit}`] = `Axis ${axis} Speed=${speed * (tier + 1)}.0`;
+                return code;
+            });
         }
+        const remaining = new Set(Object.keys(bindings));
         const bindingNames = new Map(Object.keys(bindings).map(key => [key.toLowerCase(), key]));
         const output = [];
         function appendMissingBindings() {
@@ -141,11 +189,6 @@
                     line = `${key}=${bindings[key]}`;
                     remaining.delete(key);
                 }
-                // Continuous key holds use a slower axis speed rather than key pulses.
-                line = line.replace(
-                    /^(\s*Aliases\[\d+\]\s*=\s*\(Command=")[^"]*(",\s*Alias=Turn(Left|Right)\s*\))\s*$/i,
-                    (_, prefix, suffix, direction) => `${prefix}Axis aBaseX Speed=${direction.toLowerCase() === "left" ? "-" : "+"}${turnSpeed}.0${suffix}`
-                );
             }
             output.push(line);
         }
@@ -166,12 +209,12 @@
         previousRuntimeInitialized?.();
     };
 
-    function sendKey(type, code, applyShortcuts = false) {
+    function sendKey(type, code) {
         // SDL's Emscripten keyboard handler reads both code and legacy keyCode.
         const event = new KeyboardEvent(type, {
             ...keys[code], bubbles: true, cancelable: true
         });
-        if (!applyShortcuts) syntheticEvents.add(event);
+        syntheticEvents.add(event);
         canvas.dispatchEvent(event);
     }
 
@@ -261,8 +304,16 @@
             recenterView();
             return;
         }
-        sendKey("keydown", code, true);
-        sendKey("keyup", code, true);
+        if (code === "KeyF") {
+            cycleItem(1);
+        } else if (code === "KeyX") {
+            crouchToggled = !crouchToggled;
+            updateCrouch();
+        } else {
+            const target = remappedKeys[code] || code;
+            sendKey("keydown", target);
+            sendKey("keyup", target);
+        }
     });
     // Enter and Space activate a focused button through the browser.
     for (const type of ["keydown", "keyup", "keypress"]) {
@@ -281,8 +332,8 @@
         const horizontal = Math.abs(event.deltaX || 0);
         const vertical = Math.abs(event.deltaY || 0);
         if (horizontal > 0) {
-            // Synthetic events bypass remapping: original Z/C mean TurnLeft/TurnRight.
-            holdAxis(scrollAxes.horizontal, event.deltaX < 0 ? "KeyC" : "KeyZ");
+            // Dedicated axes keep slow web turning separate from classic C/Z.
+            holdAxis(scrollAxes.horizontal, touchLookKeys[0][event.deltaX < 0 ? 1 : 0]);
         }
         if (vertical && !touchKeys.has("KeyW") && !touchKeys.has("KeyS") &&
             !physicalKeys.has("KeyW") && !physicalKeys.has("KeyS")) {
@@ -304,7 +355,12 @@
 
     window.addEventListener("keydown", event => {
         if (syntheticEvents.has(event)) return;
-        if (ready && (event.code === "KeyF" || event.code === "KeyV") && overGame(event)) {
+        if (!touchLaptopEnabled() && overGame(event)) physicalKeys.add(event.code);
+        if (!touchLaptopEnabled() && helperKeys.has(event.code)) {
+            event.stopImmediatePropagation();
+            return;
+        }
+        if (touchLaptopEnabled() && ready && (event.code === "KeyF" || event.code === "KeyV") && overGame(event)) {
             event.preventDefault();
             event.stopImmediatePropagation();
             if (!cycleKeysHeld.has(event.code)) {
@@ -313,7 +369,7 @@
             }
             return;
         }
-        if (ready && (event.code === "KeyC" || event.code === "KeyX") && overGame(event)) {
+        if (touchLaptopEnabled() && ready && (event.code === "KeyC" || event.code === "KeyX") && overGame(event)) {
             event.preventDefault();
             event.stopImmediatePropagation();
             if (event.code === "KeyC") {
@@ -325,7 +381,7 @@
             updateCrouch();
             return;
         }
-        if (ready && remappedKeys[event.code] && overGame(event)) {
+        if (touchLaptopEnabled() && ready && remappedKeys[event.code] && overGame(event)) {
             event.preventDefault();
             event.stopImmediatePropagation();
             if (!remappedHeld.has(event.code)) {
@@ -347,6 +403,11 @@
     }, true);
     window.addEventListener("keyup", event => {
         if (syntheticEvents.has(event)) return;
+        physicalKeys.delete(event.code);
+        if (!touchLaptopEnabled() && helperKeys.has(event.code)) {
+            event.stopImmediatePropagation();
+            return;
+        }
         if ((event.code === "KeyC" && crouchHeld) || (event.code === "KeyX" && crouchToggleKeyHeld)) {
             event.preventDefault();
             event.stopImmediatePropagation();
@@ -367,7 +428,6 @@
             remappedHeld.delete(event.code);
             return;
         }
-        physicalKeys.delete(event.code);
         if (touchKeys.has(event.code)) event.stopImmediatePropagation();
     }, true);
 
@@ -680,6 +740,9 @@
         for (const code of remappedHeld.values()) sendKey("keyup", code);
         remappedHeld.clear();
         cycleKeysHeld.clear();
+        for (const code of physicalKeys) {
+            if (keys[code]) sendKey("keyup", code);
+        }
         physicalKeys.clear();
         resetTouch();
         cancelLeftPresses();
@@ -688,6 +751,7 @@
     }
     window.addEventListener("blur", reset);
     touchLaptop?.addEventListener("change", () => {
+        updateShortcutHints();
         reset();
         touchMode = false;
         if (touchLaptopEnabled() && window.matchMedia?.("(hover: none) and (pointer: coarse)").matches) {

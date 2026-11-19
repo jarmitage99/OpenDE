@@ -4,12 +4,25 @@ const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 
+// Use the complete shipped CRLF file so section boundaries and movement
+// aliases are exercised, not just a subset of shortcut bindings.
+const classicIni = fs.readFileSync(path.join(__dirname, "fixtures/DefUser.ini"), "utf8");
+
 function createGame(ini = "[Engine.Input]\nX=Duck\nTab=DropItem\n") {
     const listeners = new Map();
     const canvasListeners = new Map();
     const shortcutListeners = new Map();
+    const modeListeners = new Map();
+    const modeCheckbox = {
+        checked: true,
+        addEventListener(type, listener) { modeListeners.set(type, listener); }
+    };
+    const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
+    const hints = Array.from(html.matchAll(/data-web="([^"]+)" data-classic="([^"]+)"/g),
+        match => ({ dataset: { web: match[1], classic: match[2] }, textContent: "" }));
     const shortcuts = {
         addEventListener(type, listener) { shortcutListeners.set(type, listener); },
+        querySelectorAll() { return hints; },
         contains() { return false; }
     };
     const actions = [];
@@ -60,10 +73,10 @@ function createGame(ini = "[Engine.Input]\nX=Duck\nTab=DropItem\n") {
     vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../controls.js"), "utf8"), {
         Module,
         FS: {
-            analyzePath: () => ({ exists: true }), readFile: () => ini,
+            analyzePath: () => ({ exists: true }), readFile: file => file === "/game/System/DefUser.ini" ? classicIni : ini,
             mkdirTree() {}, writeFile: (file, text) => { settings = text; }
         },
-        document: { getElementById: id => id === "canvas" ? canvas : id === "game-shortcuts" ? shortcuts : null, addEventListener() {} },
+        document: { getElementById: id => ({ canvas, "game-shortcuts": shortcuts, "touch-laptop": modeCheckbox })[id] ?? null, addEventListener() {} },
         window: {
             addEventListener(type, listener) {
                 if (!listeners.has(type)) listeners.set(type, []);
@@ -76,6 +89,24 @@ function createGame(ini = "[Engine.Input]\nX=Duck\nTab=DropItem\n") {
     Module.postRun.forEach(callback => callback());
     return {
         actions, keyEvents, touchEvents, mouseEvents, settings,
+        hints,
+        setWebMode(enabled) {
+            modeCheckbox.checked = enabled;
+            modeListeners.get("change")();
+        },
+        shortcut(code) {
+            shortcutListeners.get("click")({ target: { closest: () => ({ dataset: { key: code } }) } });
+        },
+        wheel(deltaY, deltaX = 0) {
+            const event = new WheelEvent("wheel", { target: canvas, deltaY, deltaX });
+            dispatch(event);
+            return event;
+        },
+        mouse(type, button = 0) {
+            const event = new InputEvent(type, { target: canvas, button });
+            dispatch(event);
+            return event;
+        },
         jumpForward() {
             shortcutListeners.get("click")({ target: { closest: () => ({ dataset: { action: "jump-forward" } }) } });
         },
@@ -98,6 +129,117 @@ function createGame(ini = "[Engine.Input]\nX=Duck\nTab=DropItem\n") {
         }
     };
 }
+
+test("shortcut hints start in web mode and follow mode changes both ways", () => {
+    const game = createGame();
+    assert.deepEqual(game.hints.map(hint => hint.textContent), [
+        "(touch-hold)", "(Z)", "(R)", "(F)", "(End)", "(Tab)"
+    ]);
+    game.setWebMode(false);
+    assert.deepEqual(game.hints.map(hint => hint.textContent), [
+        "(Right-click)", "([)", "(;)", "(wheel down)", "(End)", "(I)"
+    ]);
+    game.setWebMode(true);
+    assert.equal(game.hints[0].textContent, "(touch-hold)");
+});
+
+// Match the engine parser's LF line boundaries; do not silently repair a
+// malformed header here, or the regression test would hide the original bug.
+function engineIni(text) {
+    const sections = new Map();
+    let current;
+    for (const raw of text.split("\n")) {
+        const line = raw.trim();
+        if (line.startsWith("[") && line.endsWith("]")) {
+            current = new Map();
+            sections.set(line.slice(1, -1), current);
+        } else if (current && line.includes("=")) {
+            const at = line.indexOf("=");
+            current.set(line.slice(0, at).trim(), line.slice(at + 1).trim());
+        }
+    }
+    return sections;
+}
+
+test("full shipped INI keeps movement, mouse look, and player sections across reloads", () => {
+    let saved = classicIni.replace("MouseSensitivity=3.000000", "MouseSensitivity=4.500000");
+    for (let reload = 0; reload < 3; reload++) {
+        saved = createGame(saved).settings;
+        const sections = engineIni(saved);
+        const input = sections.get("Engine.Input");
+        for (const [key, command] of Object.entries({ W: "MoveForward", A: "StrafeLeft", S: "MoveBackward", D: "StrafeRight", MouseX: "Axis aMouseX Speed=6.0", MouseY: "Axis aMouseY Speed=6.0" })) {
+            assert.equal(input.get(key), command);
+        }
+        assert.match(input.get("Aliases[1]"), /Alias=MoveForward/);
+        assert.equal(sections.get("Engine.PlayerPawn").get("bAlwaysMouseLook"), "True");
+        assert.equal(sections.get("Engine.PlayerPawn").get("MouseSensitivity"), "4.500000");
+        assert.equal(sections.get("DeusEx.DeusExPlayer").get("bAlwaysRun"), "True");
+    }
+});
+
+test("startup repairs both joined and already-lost player section headers", () => {
+    const joined = classicIni.replace(/(?:\r?\n)+\[Engine.PlayerPawn\]/, "\r[Engine.PlayerPawn]");
+    assert.equal(engineIni(joined).has("Engine.PlayerPawn"), false);
+    for (const corrupted of [joined, joined.replace("\r[Engine.PlayerPawn]", "")]) {
+        const repaired = engineIni(createGame(corrupted).settings);
+        assert.equal(repaired.get("Engine.Input").get("W"), "MoveForward");
+        assert.equal(repaired.get("Engine.PlayerPawn").get("bAlwaysMouseLook"), "True");
+    }
+});
+
+test("Classic restores original bindings and passes keyboard, wheel, and mouse through", () => {
+    const game = createGame("[Engine.Input]\nF=NextBeltItem\nR=ReloadWeapon\nAliases[3]=(Command=\"Axis aBaseX Speed=-50.0\",Alias=TurnLeft)\n[Other]\nKeep=True\n");
+    assert.match(game.settings, /^F=CenterView$/m);
+    assert.match(game.settings, /^R=LookUp$/m);
+    assert.match(game.settings, /^V=LookDown$/m);
+    assert.match(game.settings, /Speed=-150.0/);
+    assert.match(game.settings, /\[Other\]\nKeep=True/);
+    game.setWebMode(false);
+    for (const code of ["KeyF", "KeyV", "KeyR", "KeyY", "KeyT", "KeyC", "KeyX", "KeyZ", "Tab"]) {
+        assert.equal(game.key("keydown", code).stopped, undefined, code);
+        assert.equal(game.key("keyup", code).stopped, undefined, code);
+    }
+    assert.equal(game.wheel(3).stopped, undefined);
+    assert.equal(game.mouse("mousedown").stopped, undefined);
+    assert.equal(game.mouse("mouseup").stopped, undefined);
+    assert.deepEqual(game.keyEvents, []);
+    assert.deepEqual(game.actions, []);
+    game.setWebMode(true);
+    assert.equal(game.wheel(3).stopped, true);
+    assert.deepEqual(game.keyEvents, [["keydown", "KeyW"]]);
+    game.setWebMode(false);
+    assert.deepEqual(game.keyEvents.at(-1), ["keyup", "KeyW"]);
+});
+
+test("web remaps and action buttons target native bindings in either mode", () => {
+    const game = createGame();
+    for (const [source, target] of [["KeyR", "Semicolon"], ["KeyY", "Backspace"], ["KeyZ", "BracketLeft"], ["Tab", "KeyI"]]) {
+        game.key("keydown", source);
+        game.key("keyup", source);
+        assert.deepEqual(game.keyEvents.splice(0), [["keydown", target], ["keyup", target]]);
+    }
+    game.setWebMode(false);
+    for (const [source, target] of [["KeyR", "Semicolon"], ["KeyZ", "BracketLeft"], ["Tab", "KeyI"]]) {
+        game.shortcut(source);
+        assert.deepEqual(game.keyEvents.splice(0), [["keydown", target], ["keyup", target]]);
+    }
+    game.shortcut("KeyF");
+    assert.deepEqual(game.actions, ["next"]);
+});
+
+test("switching modes releases remapped and native held keys", () => {
+    const game = createGame();
+    game.key("keydown", "KeyR");
+    game.setWebMode(false);
+    assert.deepEqual(game.keyEvents.splice(0), [["keydown", "Semicolon"], ["keyup", "Semicolon"]]);
+    game.key("keydown", "KeyR");
+    game.setWebMode(true);
+    assert.deepEqual(game.keyEvents.splice(0), [["keyup", "KeyR"]]);
+    game.key("keyup", "KeyR");
+    game.key("keydown", "KeyR");
+    assert.deepEqual(game.keyEvents, [["keydown", "Semicolon"]]);
+    game.blur();
+});
 
 test("every F/V press produces a full next/previous step, including alternating directions", () => {
     const game = createGame();
@@ -128,7 +270,7 @@ test("T forwards the throw/drop binding rather than cycling weapons", () => {
     game.key("keyup", "KeyT");
     assert.deepEqual(game.actions, []);
     assert.deepEqual(game.keyEvents, [["keydown", "Tab"], ["keyup", "Tab"]]);
-    assert.match(game.settings, /T=DropItem/);
+    assert.match(game.settings, /^T=$/m);
     assert.match(game.settings, /Tab=DropItem/);
 });
 
@@ -166,7 +308,7 @@ test("saved native toggle mode is disabled without altering other player setting
     const game = createGame("[DeusEx.DeusExPlayer]\r\nbToggleCrouch=True\r\nbAlwaysRun=True\r\n[Engine.Input]\r\nX=Duck\r\n");
     assert.match(game.settings, /bToggleCrouch=False\r\n/);
     assert.match(game.settings, /bAlwaysRun=True\r\n/);
-    assert.match(game.settings, /V=PrevBeltItem/);
+    assert.match(game.settings, /V=LookDown/);
 });
 
 test("forward jump leads with movement, releases jump first, and cancels on blur", async () => {
@@ -240,7 +382,7 @@ test("hold-and-drag right-clicks then looks, while a quick drag keeps moving and
     game.touch("touchmove", 400, 120, 80);
     game.touch("touchend", 450, 120, 80);
     assert.deepEqual(game.keyEvents.splice(0), [
-        ["keydown", "KeyC"], ["keydown", "Delete"], ["keyup", "KeyC"], ["keyup", "Delete"]
+        ["keydown", "Numpad1"], ["keydown", "Numpad2"], ["keyup", "Numpad1"], ["keyup", "Numpad2"]
     ]);
     assert.deepEqual(game.mouseEvents.splice(0), [["mousedown", 2], ["mouseup", 2]]);
 
@@ -249,7 +391,7 @@ test("hold-and-drag right-clicks then looks, while a quick drag keeps moving and
     game.touch("touchmove", 1000, 125, 75);
     game.touch("touchend", 1050, 125, 75);
     assert.deepEqual(game.keyEvents, [
-        ["keydown", "KeyW"], ["keydown", "KeyC"], ["keyup", "KeyW"], ["keyup", "KeyC"]
+        ["keydown", "KeyW"], ["keydown", "Numpad1"], ["keyup", "KeyW"], ["keyup", "Numpad1"]
     ]);
     assert.deepEqual(game.mouseEvents, []);
     assert.deepEqual(game.touchEvents, []);
