@@ -37,6 +37,4 @@ CMakeUserPresets.json
 *.dwo
 *.DS_Store
 .env
-# later bring this back in:
-static/*
 
