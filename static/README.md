@@ -100,3 +100,23 @@ For a keyboard-only change, keep the key handlers, key-related INI edits, and ke
    `static/index.html` maps the generated loader's `index.wasm` and `index.data` requests to the `deusex.*` names. Use the loader, WASM, and data from the same build.
 
 3. Run `python3 -m http.server 7331 --bind 127.0.0.1 --directory static` and open `http://127.0.0.1:7331/explore.html` in a WebGL 2 browser. Run `node --test static/tests/controls.test.cjs` for the keyboard tests. With Chrome or Chromium available, `node scripts/check-web.mjs` checks title-screen startup, controls, and pause/resume. Pass `training` or `game` to check a direct launch into Training or Liberty Island. Set `CHROME_BIN` if the browser is installed at a custom path.
+
+### Game-data download and cache
+
+`data-source.js` points the page at `demo_v1/deusex.data.gz`. Its HTTP
+`Content-Encoding: gzip` is decoded by the browser; the generated loader still
+receives the original LZ4 package, with the same size and SHA-256 identity.
+
+At the top of the page, a read-only probe checks Emscripten's IndexedDB metadata.
+On a confirmed cache miss it adds a CORS fetch preload so the browser can start
+the download before WASM initialization. The loader uses the same URL and request
+credentials to reuse that preload. Existing metadata suppresses the hint, and a
+late/blocked probe never adds a preload after the loader has selected the URL.
+Browsers without fetch-preload support simply use the normal loader request.
+
+Emscripten's existing `--use-preload-cache` remains responsible for storing the
+bundle in `EM_PRELOAD_CACHE`, validating the package UUID and recovering from
+cache failures. Changing to the gzip URL does not invalidate a valid existing
+package cache. This is browser-managed storage: clearing site data, storage
+pressure, or private browsing can remove or limit it. No second asset cache or
+persistent-storage permission is introduced.
