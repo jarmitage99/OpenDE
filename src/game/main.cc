@@ -1,5 +1,6 @@
 #include "audio/audio.h"
 #include "core/config.h"
+#include "core/mods.h"
 #include "core/objects.h"
 #include "core/url.h"
 #include "core/vm.h"
@@ -164,7 +165,8 @@ namespace {
         std::string screenshot;
         std::string ini;
         std::string userIni;
-        std::string mod;
+        std::vector<std::string> mods;
+        bool checkMods = false;
         int frames = -1;
         int width = 1280;
         int height = 720;
@@ -193,7 +195,9 @@ namespace {
             } else if (arg == "--userini" && i + 1 < argc) {
                 options.userIni = argv[++i];
             } else if (arg == "--mod" && i + 1 < argc) {
-                options.mod = argv[++i];
+                options.mods.push_back(argv[++i]);
+            } else if (arg == "--check-mods") {
+                options.checkMods = true;
             } else if (arg == "--exec" && i + 1 < argc) {
                 options.commands.push_back(argv[++i]);
             } else if (arg == "--at" && i + 1 < argc) {
@@ -207,6 +211,45 @@ namespace {
             }
         }
         return options;
+    }
+
+    std::vector<std::filesystem::path> modPaths(const std::filesystem::path& root, const std::vector<std::string>& names)
+    {
+        std::filesystem::path modsRoot = dx::mods::findRoot(root);
+        std::vector<std::filesystem::path> paths;
+        for (const std::string& name : names.empty() ? dx::mods::enabled() : names) {
+            paths.push_back(modsRoot / name);
+        }
+        return paths;
+    }
+
+    struct ModReport {
+        std::string text;
+        bool fatal = false;
+    };
+
+    ModReport reportMods(const std::filesystem::path& root, const std::vector<std::filesystem::path>& mods)
+    {
+        ModReport report;
+        for (const dx::mods::Issue& issue : dx::mods::check(root, mods)) {
+            report.text += std::string(issue.fatal ? "error: " : "warning: ") + issue.text + "\n";
+            report.fatal = report.fatal || issue.fatal;
+        }
+        return report;
+    }
+
+    int checkMods(const Options& options)
+    {
+        std::filesystem::path root = dx::config::findGameRoot(DEUSEX_GAME_DATA);
+        dx::engine::registerNatives();
+        std::vector<std::filesystem::path> mods = modPaths(root, options.mods);
+        if (mods.empty()) {
+            std::printf("No mods enabled.\n");
+            return 0;
+        }
+        ModReport report = reportMods(root, mods);
+        std::fputs(report.text.empty() ? "No problems found.\n" : report.text.c_str(), stdout);
+        return report.fatal ? 1 : 0;
     }
 
     void saveBmp(const std::string& path, const std::vector<uint8_t>& rgba, int width, int height)
@@ -414,6 +457,57 @@ namespace {
             }
         }
 
+        void addModsMenu(const std::filesystem::path& root)
+        {
+            std::filesystem::path modsRoot = dx::mods::findRoot(root);
+            std::vector<std::string> names = dx::mods::available(modsRoot);
+            if (names.empty()) {
+                return;
+            }
+            if (names.size() > 9) {
+                names.resize(9);
+            }
+            dx::UClass* screen = createExtraOptionsScreen("MenuScreenMods", "Mods");
+            for (size_t i = 0; i < names.size(); i++) {
+                dx::UClass* choice = dx::objects::createSubclass(dx::objects::findClass("DeusEx.MenuChoice_DetailTextures"), dx::Name("MenuChoice_Mod" + std::to_string(i)));
+                dx::UObject* defaults = choice->defaultObject;
+                *reinterpret_cast<std::string*>(defaults->propertyAddress(dx::Name("actionText"))) = names[i];
+                *reinterpret_cast<std::string*>(defaults->propertyAddress(dx::Name("helpText"))) = dx::mods::describe(root, modsRoot, names[i], names);
+                *reinterpret_cast<std::string*>(defaults->propertyAddress(dx::Name("configSetting"))) = "mod: " + names[i];
+                *reinterpret_cast<int32_t*>(defaults->propertyAddress(dx::Name("defaultValue"))) = 0;
+                *reinterpret_cast<int32_t*>(defaults->propertyAddress(dx::Name("defaultInfoWidth"))) = 88;
+                *reinterpret_cast<int32_t*>(defaults->propertyAddress(dx::Name("defaultInfoPosX"))) = 270;
+                *reinterpret_cast<std::string*>(defaults->propertyAddress(dx::Name("enumText"), 0)) = "Off";
+                *reinterpret_cast<std::string*>(defaults->propertyAddress(dx::Name("enumText"), 1)) = "On";
+                *reinterpret_cast<dx::UObject**>(screen->defaultObject->propertyAddress(dx::Name("choices"), static_cast<int32_t>(i))) = choice;
+            }
+            dx::UObject* screenDefaults = screen->defaultObject;
+            int gap = *reinterpret_cast<int32_t*>(screenDefaults->propertyAddress(dx::Name("choiceVerticalGap")));
+            int unused = 9 - static_cast<int>(names.size());
+            if (unused > 0) {
+                dx::deusex::spliceMenuBackground(screenDefaults, 55 + (8 - unused) * gap, 55 + 8 * gap);
+                *reinterpret_cast<int32_t*>(screenDefaults->propertyAddress(dx::Name("ClientHeight"))) -= unused * gap;
+                *reinterpret_cast<int32_t*>(screenDefaults->propertyAddress(dx::Name("helpPosY"))) -= unused * gap;
+            }
+            dx::UClass* settingsClass = dx::objects::findClass("DeusEx.MenuSettings");
+            std::vector<dx::UClass*> menus;
+            for (dx::UObject* object : dx::objects::all()) {
+                dx::UClass* cls = dx::cast<dx::UClass>(object);
+                if (cls && cls->defaultObject && cls->isChildOf(settingsClass)) {
+                    menus.push_back(cls);
+                }
+            }
+            for (dx::UClass* menu : menus) {
+                dx::UStruct* button = menu->findProperty(dx::Name("buttonDefaults"))->structType;
+                uint8_t* slot = menu->defaultObject->propertyAddress(dx::Name("buttonDefaults"), 9);
+                uint8_t action = *(slot + button->findProperty(dx::Name("Action"))->offset);
+                dx::UObject* invoke = *reinterpret_cast<dx::UObject**>(slot + button->findProperty(dx::Name("Invoke"))->offset);
+                if (action == 0 && !invoke) {
+                    dx::deusex::insertMenuButton(menu->defaultObject, 8, "Mods", screen);
+                }
+            }
+        }
+
         void addPlayerSpeedChoice(dx::UClass* screen, int index)
         {
             dx::UClass* choice = dx::objects::createSubclass(dx::objects::findClass("DeusEx.MenuUIChoiceSlider"), dx::Name("MenuChoice_PlayerSpeed"));
@@ -526,14 +620,20 @@ namespace {
         bool start()
         {
             std::filesystem::path root = dx::config::findGameRoot(DEUSEX_GAME_DATA);
-            if (!options.mod.empty()) {
-                std::filesystem::path mod = (root / "..").lexically_normal() / "mods" / options.mod;
-                if (!std::filesystem::is_directory(mod)) {
-                    std::fprintf(stderr, "mod %s not found in %s\n", options.mod.c_str(), mod.parent_path().string().c_str());
-                    return false;
-                }
-                dx::config::useMod(mod);
+            dataRoot = root;
+            dx::engine::registerNatives();
+            std::vector<std::filesystem::path> mods = modPaths(root, options.mods);
+            ModReport report = reportMods(root, mods);
+            std::fputs(report.text.c_str(), stderr);
+            if (report.fatal && !options.mods.empty()) {
+                return false;
             }
+            if (report.fatal) {
+                std::string message = "The enabled mods can't be used together, so the game starts without them.\n\n" + report.text;
+                SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, "Mods", message.c_str(), window);
+                mods.clear();
+            }
+            dx::config::useMods(mods);
             dx::engine::initialize(root.string(), options.ini, options.userIni);
             dx::audio::initialize();
             dx::audio::setLightRandom(dx::lightRandomBase);
@@ -625,6 +725,7 @@ namespace {
             loadPackageClasses(rootClass.substr(0, rootClass.find('.')));
             addFieldOfViewChoice();
             addExtraOptions();
+            addModsMenu(root);
             std::string map = options.map;
             std::filesystem::path mapFile = map;
             if (mapFile.has_parent_path() && std::filesystem::is_regular_file(mapFile)) {
@@ -979,9 +1080,27 @@ namespace {
             return 0;
         }
 
+        void reportModChanges()
+        {
+            if (!dx::mods::takeChanged()) {
+                return;
+            }
+            ModReport report = reportMods(dataRoot, modPaths(dataRoot, {}));
+            std::fputs(report.text.c_str(), stderr);
+            if (report.text.empty()) {
+                return;
+            }
+            std::string message = report.text;
+            if (report.fatal) {
+                message += "\nThese mods can't be used together, so the game will start without them.";
+            }
+            SDL_ShowSimpleMessageBox(report.fatal ? SDL_MESSAGEBOX_ERROR : SDL_MESSAGEBOX_WARNING, "Mods", message.c_str(), window);
+        }
+
         void step()
         {
             processEvents();
+            reportModChanges();
             bool gui = dx::extension::wantsMouse();
             if (gui != guiMode) {
                 guiMode = gui;
@@ -1082,6 +1201,7 @@ namespace {
         float appliedPlayerSpeed = 1.0f;
         int appliedVSync = -1;
         uint64_t frameDeadline = 0;
+        std::filesystem::path dataRoot;
         std::unordered_map<dx::UClass*, std::pair<float, float>> basePlayerSpeeds;
     };
 }
@@ -1089,6 +1209,9 @@ namespace {
 int main(int argc, char** argv)
 {
     Options options = parseOptions(argc, argv);
+    if (options.checkMods) {
+        return checkMods(options);
+    }
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) {
         std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
         return 1;

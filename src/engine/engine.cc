@@ -17,6 +17,15 @@
 #include <filesystem>
 
 namespace dx::engine {
+    void registerNatives()
+    {
+        registerObjectNatives();
+        registerEngineNatives();
+        extension::registerNatives();
+        registerDeusExNatives();
+        registerTnmNatives();
+    }
+
     void initializeCore(const std::string& gameRoot, const std::filesystem::path& systemIni, const std::filesystem::path& userIni)
     {
         static bool initialized = false;
@@ -28,11 +37,7 @@ namespace dx::engine {
         config::initialize(root / "System", systemIni, userIni);
         registerEngineResources();
         registerMeshResources();
-        registerObjectNatives();
-        registerEngineNatives();
-        extension::registerNatives();
-        registerDeusExNatives();
-        registerTnmNatives();
+        registerNatives();
         objects::initialize(root);
     }
 

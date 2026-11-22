@@ -571,7 +571,7 @@ TEST_CASE("a mod finds its own inis, localization and user directory", "[data]")
     std::ofstream(mod / "TestModData" / "System" / "TESTMODuser.ini") << "[Engine.Input]\r\nF1=ModHelp\r\n";
     std::ofstream(mod / "System" / "ModOverlayText.int") << "[Labels]\r\nTitle=From the mod\r\n";
     std::filesystem::path vanillaUser = dx::config::userDirectory();
-    dx::config::useMod(mod);
+    dx::config::useMods({ mod });
     dx::config::system() = dx::Ini();
     dx::config::user() = dx::Ini();
     dx::config::initialize(std::filesystem::path(DEUSEX_GAME_DATA) / "System");
@@ -581,7 +581,7 @@ TEST_CASE("a mod finds its own inis, localization and user directory", "[data]")
     std::filesystem::path userPath = dx::config::user().path;
     std::filesystem::path modUser = dx::config::userDirectory();
     std::string title = dx::config::localize("Labels", "Title", "ModOverlayText");
-    dx::config::useMod({});
+    dx::config::useMods({});
     dx::config::system() = system;
     dx::config::user() = user;
     std::filesystem::remove_all(base);
@@ -607,11 +607,11 @@ TEST_CASE("a mod's packages win over the game's for the same Paths entry", "[dat
     std::filesystem::copy_file(std::filesystem::path(DEUSEX_GAME_DATA) / "Textures" / "CoreTexCeramic.utx", mod / "Textures" / "ModOverlayTex.utx");
     dx::config::system() = dx::Ini();
     dx::config::system().set("Core.System", "Paths", "..\\Textures\\*.utx");
-    dx::config::useMod(mod);
+    dx::config::useMods({ mod });
     std::filesystem::path root = dx::objects::gameRoot();
     dx::objects::initialize(game);
     dx::objects::initialize(root);
-    dx::config::useMod({});
+    dx::config::useMods({});
     dx::config::system() = system;
     dx::Linker* linker = dx::objects::loadPackage(dx::Name("ModOverlayTex"));
     REQUIRE(linker != nullptr);
@@ -693,7 +693,7 @@ TEST_CASE("a mod with Default and DefUser inis, its own language and files outsi
     std::ofstream(mod / "System" / "LangText.opt") << "[Labels]\r\nTitle=Translated\r\n";
     std::ofstream(mod / "System" / "LangText.int") << "[Labels]\r\nTitle=Original\r\nSubtitle=Only in int\r\n";
     std::ofstream(mod / "Music" / "Ogg" / "Track.OGG").close();
-    dx::config::useMod(mod);
+    dx::config::useMods({ mod });
     dx::config::system() = dx::Ini();
     dx::config::user() = dx::Ini();
     dx::config::initialize(std::filesystem::path(DEUSEX_GAME_DATA) / "System");
@@ -706,7 +706,7 @@ TEST_CASE("a mod with Default and DefUser inis, its own language and files outsi
     std::string subtitle = dx::config::localize("Labels", "Subtitle", "LangText");
     std::filesystem::path track = dx::config::findFile("..\\music\\ogg\\track.ogg");
     std::filesystem::path stock = dx::config::findFile("..\\System\\Engine.u");
-    dx::config::useMod({});
+    dx::config::useMods({});
     dx::config::system() = system;
     dx::config::user() = user;
     std::filesystem::remove_all(base);

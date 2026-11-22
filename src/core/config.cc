@@ -1,5 +1,6 @@
 #include "core/config.h"
 
+#include "core/mods.h"
 #include "core/objects.h"
 #include "engine/package.h"
 
@@ -40,7 +41,7 @@ namespace dx {
 
         struct ConfigState {
             std::filesystem::path systemDirectory;
-            std::filesystem::path modDirectory;
+            mods::Layout mods;
             Ini system;
             Ini user;
             std::unordered_map<std::string, std::unique_ptr<Ini>> others;
@@ -311,7 +312,7 @@ namespace dx {
             return fallback;
         }
 
-        std::filesystem::path userDirectory()
+        std::filesystem::path baseUserDirectory()
         {
             const char* xdg = std::getenv("XDG_DATA_HOME");
 #ifdef _WIN32
@@ -324,8 +325,26 @@ namespace dx {
             const char* home = std::getenv("HOME");
             std::filesystem::path base = xdg ? std::filesystem::path(xdg) : (home ? std::filesystem::path(home) / ".local" / "share" : std::filesystem::temp_directory_path());
             std::filesystem::path directory = base / "deusex";
-            if (!state().modDirectory.empty()) {
-                directory = directory / "mods" / state().modDirectory.filename();
+            std::error_code error;
+            std::filesystem::create_directories(directory, error);
+            return directory;
+        }
+
+        std::filesystem::path userDirectory()
+        {
+            std::filesystem::path directory = baseUserDirectory();
+            std::vector<std::filesystem::path> directories = modDirectories();
+            if (!directories.empty()) {
+                std::vector<std::string> names;
+                for (const std::filesystem::path& mod : directories) {
+                    names.push_back(mod.filename().string());
+                }
+                std::sort(names.begin(), names.end());
+                std::string joined;
+                for (const std::string& name : names) {
+                    joined += (joined.empty() ? "" : "+") + name;
+                }
+                directory = directory / "mods" / joined;
             }
             std::error_code error;
             std::filesystem::create_directories(directory, error);
@@ -341,24 +360,6 @@ namespace dx {
         }
 
         namespace {
-            std::filesystem::path findModIni(const std::filesystem::path& mod)
-            {
-                std::vector<std::filesystem::path> candidates;
-                for (const auto& item : std::filesystem::recursive_directory_iterator(mod)) {
-                    if (item.is_regular_file() && iequals(item.path().extension().string(), ".ini")) {
-                        candidates.push_back(item.path());
-                    }
-                }
-                std::sort(candidates.begin(), candidates.end());
-                for (const std::filesystem::path& candidate : candidates) {
-                    Ini ini;
-                    if (ini.load(candidate) && !ini.getAll("Core.System", "Paths").empty()) {
-                        return candidate;
-                    }
-                }
-                return {};
-            }
-
             bool endsWith(const std::string& text, std::string_view suffix)
             {
                 return text.size() > suffix.size() && iequals(std::string_view(text).substr(text.size() - suffix.size()), suffix);
@@ -408,14 +409,23 @@ namespace dx {
             }
         }
 
-        void useMod(const std::filesystem::path& directory)
+        void useMods(const std::vector<std::filesystem::path>& directories)
         {
-            state().modDirectory = directory;
+            state().mods = mods::layout(directories);
         }
 
-        std::filesystem::path modDirectory()
+        const mods::Layout& modLayout()
         {
-            return state().modDirectory;
+            return state().mods;
+        }
+
+        std::vector<std::filesystem::path> modDirectories()
+        {
+            std::vector<std::filesystem::path> directories = state().mods.addons;
+            if (!state().mods.base.empty()) {
+                directories.push_back(state().mods.base);
+            }
+            return directories;
         }
 
         std::filesystem::path resolveCase(const std::filesystem::path& path)
@@ -440,8 +450,8 @@ namespace dx {
         {
             std::replace(relativeToSystem.begin(), relativeToSystem.end(), '\\', '/');
             std::vector<std::filesystem::path> systems;
-            if (!state().modDirectory.empty()) {
-                systems.push_back(state().modDirectory / "System");
+            for (const std::filesystem::path& mod : modDirectories()) {
+                systems.push_back(mod / "System");
             }
             systems.push_back(state().systemDirectory);
             for (const std::filesystem::path& system : systems) {
@@ -460,10 +470,10 @@ namespace dx {
             std::filesystem::path userDir = userDirectory();
             std::filesystem::path systemFile = systemIni;
             std::filesystem::path userFile = userIni;
-            if (!s.modDirectory.empty() && systemFile.empty()) {
-                systemFile = findModIni(s.modDirectory);
+            if (systemFile.empty()) {
+                systemFile = s.mods.ini;
             }
-            if (!s.modDirectory.empty() && userFile.empty() && !systemFile.empty()) {
+            if (!modDirectories().empty() && userFile.empty() && !systemFile.empty()) {
                 userFile = findModUserIni(systemFile);
             }
             if (systemFile.empty()) {
@@ -500,7 +510,13 @@ namespace dx {
                 return it->second.get();
             }
             auto ini = std::make_unique<Ini>();
-            std::filesystem::path preferred = state().modDirectory.empty() ? state().systemDirectory : state().modDirectory / "System";
+            std::filesystem::path preferred = state().systemDirectory;
+            std::vector<std::filesystem::path> directories = modDirectories();
+            for (auto mod = directories.rbegin(); mod != directories.rend(); ++mod) {
+                if (std::filesystem::is_regular_file(*mod / "System" / (configName.str() + ".ini"))) {
+                    preferred = *mod / "System";
+                }
+            }
             loadPreferred(*ini, userDirectory() / (configName.str() + ".ini"), preferred / (configName.str() + ".ini"), state().systemDirectory / (configName.str() + ".ini"));
             Ini* result = ini.get();
             state().others.emplace(key, std::move(ini));
@@ -516,8 +532,8 @@ namespace dx {
             }
             auto ini = std::make_unique<Ini>();
             std::vector<std::filesystem::path> directories;
-            if (!state().modDirectory.empty()) {
-                directories.push_back(state().modDirectory / "System");
+            for (const std::filesystem::path& mod : modDirectories()) {
+                directories.push_back(mod / "System");
             }
             directories.push_back(state().systemDirectory);
             std::string language = lower(state().system.get("Engine.Engine", "Language").value_or("int"));

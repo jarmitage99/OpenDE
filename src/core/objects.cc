@@ -431,27 +431,10 @@ namespace dx {
             if (reg.table.empty()) {
                 reg.table.push_back(nullptr);
             }
-            const char* folders[] = { "System", "Textures", "Sounds", "Music", "Maps" };
             const char* extensions[] = { ".u", ".utx", ".uax", ".umx", ".dx", ".unr" };
-            std::vector<std::filesystem::path> roots;
-            if (!config::modDirectory().empty()) {
-                roots.push_back(config::modDirectory());
-            }
-            roots.push_back(gameRoot);
             std::vector<std::pair<std::filesystem::path, std::string>> directories;
-            for (std::string entry : config::system().getAll("Core.System", "Paths")) {
-                std::replace(entry.begin(), entry.end(), '\\', '/');
-                std::filesystem::path pattern(entry);
-                for (const std::filesystem::path& root : roots) {
-                    directories.emplace_back(config::resolveCase((root / "System" / pattern.parent_path()).lexically_normal()), lower(pattern.extension().string()));
-                }
-            }
-            if (directories.empty()) {
-                for (const char* folder : folders) {
-                    for (const std::filesystem::path& root : roots) {
-                        directories.emplace_back(root / folder, "");
-                    }
-                }
+            for (const mods::SearchDirectory& search : mods::searchDirectories(gameRoot, config::modLayout(), config::system().getAll("Core.System", "Paths"))) {
+                directories.emplace_back(search.directory, search.extension);
             }
             std::filesystem::path user = config::userDirectory();
             for (const char* folder : { "System", "Textures", "Sounds", "Music" }) {

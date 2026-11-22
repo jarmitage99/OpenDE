@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/mods.h"
 #include "core/object.h"
 
 #include <filesystem>
@@ -33,9 +34,11 @@ namespace dx {
 
     namespace config {
         std::filesystem::path findGameRoot(const std::filesystem::path& fallback);
+        std::filesystem::path baseUserDirectory();
         std::filesystem::path userDirectory();
-        void useMod(const std::filesystem::path& directory);
-        std::filesystem::path modDirectory();
+        void useMods(const std::vector<std::filesystem::path>& directories);
+        const mods::Layout& modLayout();
+        std::vector<std::filesystem::path> modDirectories();
         std::filesystem::path resolveCase(const std::filesystem::path& path);
         std::filesystem::path findFile(std::string relativeToSystem);
         void initialize(const std::filesystem::path& systemDirectory, const std::filesystem::path& systemIni = {}, const std::filesystem::path& userIni = {});

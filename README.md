@@ -88,10 +88,26 @@ written there, and saved games are in `Save/`. The game data directory is
 never written to. Key bindings are the original ones from `User.ini`, for
 example keypad `+` for QuickSave and keypad `/` for QuickLoad.
 
-## Mods: GMDX
+## Mods
 
-Mods live in `mods/`, right next to `game-data`, one folder each. Your game
-data never gets touched.
+One folder per mod, in `mods/` next to `game-data`, `game-data/mods`, or
+`$DEUSEX_MODS`.
+
+    $ build/bin/deusex --mod GMDX
+    $ build/bin/deusex --mod MachineGod --mod Shifter
+    $ build/bin/deusex --check-mods --mod GMDX --mod Shifter
+
+Or enable mods in Settings > Mods and restart. Only one mod with its own ini
+(GMDX, TNM, LDDP, Machine God) can be enabled; folders without an ini, like
+Shifter, load on top of it. `--check-mods` lists conflicts and missing
+natives.
+
+Add-on order: `--mod` order, else `Mod=` lines under `[Order]` in
+`~/.local/share/deusex/Mods.ini`, else alphabetical. First wins.
+
+Settings are saved on `~/.local/share/deusex/mods`.
+
+## Mods: GMDX
 
 Download GMDX from ModDB, unpack it into its own mod folder:
 
@@ -126,6 +142,22 @@ Similar setup:
 Check that `System` and `TNM2` exist in `mods/TNM`. Then:
 
     $ build/bin/deusex --mod TNM
+
+## Mods: Lay D Denton
+
+    $ mkdir -p mods/LDDP && cd mods/LDDP
+    $ unzip ../../Lay_D_Denton_Project_1.1.zip
+
+## Mods: Shifter
+
+    $ mkdir -p mods/Shifter/System && cd mods/Shifter/System
+    $ unzip ../../../Shifter_v1.8.4_info.zip DeusEx.u DeusEx.int
+
+## Mods: Machine God
+
+    $ mkdir -p mods/MachineGod && cd mods/MachineGod
+    $ unzip ../../MachineGod-0.8.3.zip
+    $ mkdir System && cp MachineGod/System/Dependencies/*.u System/
 
 ## Editor
 

@@ -132,6 +132,7 @@ namespace dx {
     namespace engine {
         void initialize(const std::string& gameRoot, const std::filesystem::path& systemIni = {}, const std::filesystem::path& userIni = {});
         void initializeCore(const std::string& gameRoot, const std::filesystem::path& systemIni = {}, const std::filesystem::path& userIni = {});
+        void registerNatives();
         void registerEngineNatives();
         void registerDeusExNatives();
         void registerTnmNatives();

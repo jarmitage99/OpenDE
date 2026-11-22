@@ -864,6 +864,15 @@ namespace dx {
             natives().byName[lowerKey(className) + "." + lowerKey(functionName)] = function;
         }
 
+        bool hasNative(int32_t index, std::string_view className, std::string_view functionName)
+        {
+            NativeRegistry& registry = natives();
+            if (index > 0 && index < 4096 && registry.byIndex[static_cast<size_t>(index)]) {
+                return true;
+            }
+            return registry.byName.count(lowerKey(className) + "." + lowerKey(functionName)) > 0;
+        }
+
         NativeFunction bindNative(UFunction* function)
         {
             NativeRegistry& registry = natives();

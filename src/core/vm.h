@@ -50,6 +50,7 @@ namespace dx {
         NativeFunction bindNative(UFunction* function);
         void registerNative(int32_t index, NativeFunction function);
         void registerNative(std::string_view className, std::string_view functionName, NativeFunction function);
+        bool hasNative(int32_t index, std::string_view className, std::string_view functionName);
         void callFunction(Frame& stack, UObject* context, UFunction* function, void* result);
         void execute(Frame& frame);
         UFunction* findFunction(UObject* object, Name functionName, bool global = false);

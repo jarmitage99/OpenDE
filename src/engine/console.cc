@@ -366,6 +366,12 @@ namespace dx {
                 std::string className = firstToken(rest, propertyRest);
                 std::string valueRest;
                 std::string propertyName = firstToken(propertyRest, valueRest);
+                if (iequals(className, "mod:")) {
+                    size_t space = propertyRest.rfind(' ');
+                    std::string value = space == std::string::npos ? std::string() : propertyRest.substr(space + 1);
+                    mods::setEnabled(propertyRest.substr(0, space), iequals(value, "True") || value == "1");
+                    return {};
+                }
                 if (iequals(className, "Input") || iequals(className, "InputExt")) {
                     uint8_t key = keyFromName(propertyName);
                     if (key) {
@@ -407,6 +413,9 @@ namespace dx {
             if (iequals(word, "get")) {
                 std::string propertyRest;
                 std::string className = firstToken(rest, propertyRest);
+                if (iequals(className, "mod:")) {
+                    return mods::isEnabled(propertyRest) ? "True" : "False";
+                }
                 std::string unused;
                 std::string propertyName = firstToken(propertyRest, unused);
                 if (className.size() > 4 && iequals(className.substr(0, 4), "ini:")) {
