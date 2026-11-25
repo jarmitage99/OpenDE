@@ -101,6 +101,21 @@ Then open `http://localhost:8000/`. The game data is LZ4 compressed
 and cached in IndexedDB after the first download, together with settings
 and saved games.
 
+The browser shell pauses simulation and suspends audio when its tab is hidden
+or loses focus. It saves once on deactivation and stops the periodic save timer
+until the page is active again. Display resizing and fullscreen preserve the
+game's render resolution and aspect ratio; the initial render size is 800×600.
+
+Web Controls enables modern keyboard mappings, touch gestures, and touchpad
+scroll movement. Uncheck it for Classic keyboard and mouse input. The on-screen
+buttons remain available in either mode and update their key hints. They provide
+Activate, Zoom, Reload, Next Item, Jump+Fwd, Recenter, Crouch, Menu, Items, and
+Fullscreen. The page includes instructions for both control modes.
+
+The shell is self-contained and uses the normal adjacent `index.js`, `index.wasm`,
+and `index.data` build outputs. It contains no hosted game-data URL or game assets.
+Run the browser host tests with `node --test tests/web/*.test.cjs`.
+
 To provision a temporary Google Cloud build VM and upload this checkout:
 
 ```sh

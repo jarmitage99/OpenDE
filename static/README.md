@@ -29,7 +29,7 @@ Earlier measurements, before restoring full culling: in a local headless Chrome 
 | `unatco_hq` | `01_NYC_UNATCOHQ` |
 
 - The static page loads [lifecycle.js](lifecycle.js) to pause the main loop and suspend SDL/miniaudio when hidden or unfocused. It also saves once on deactivation, stops the ten-second save timer while inactive, and resumes work and periodic saves on return. Settings and saves use IndexedDB through IDBFS.
-- The CMake-generated `bin/index.html` uses its own shell and save hooks. The custom input and lifecycle scripts are wired into `static/index.html`, so serve `static/` to get both. [run.sh](run.sh) is a macOS shortcut for serving that directory on port 7331 and opening the Explore page.
+- The CMake-generated `bin/index.html` includes the same browser controls, focus/audio lifecycle, and display sizing in its self-contained shell template. It loads adjacent build outputs without a hosted game-data URL. `static/index.html` remains the deployment page with the hosted-data configuration. [run.sh](run.sh) is a macOS shortcut for serving that directory on port 7331 and opening the Explore page.
 
 
 ## Web / Classic mode
