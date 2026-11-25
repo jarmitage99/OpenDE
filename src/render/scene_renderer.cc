@@ -3705,9 +3705,6 @@ namespace dx {
         viewportHeight = height;
         View view = makeView(location, rotation, fov, sceneNearPlane);
         bool wireframe = renderMode == RenderMode::Wireframe;
-#ifdef __EMSCRIPTEN__
-        view.zoneOnly = renderMode == RenderMode::Textured;
-#endif
         view.zoneMask = wireframe ? ~0ull : visibleZones(pointZone(location));
         if (levelData.model && levelData.levelInfo) {
             for (size_t zone = 0; zone < levelData.model->zones.size(); zone++) {
