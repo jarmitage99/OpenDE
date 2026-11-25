@@ -4,6 +4,8 @@
 #include "render/gl_shader.h"
 #include "render/texture_cache.h"
 
+#include <array>
+#include <optional>
 #include <vector>
 
 namespace dx {
@@ -24,20 +26,34 @@ namespace dx {
         void drawLine(float x1, float y1, float x2, float y2, LinearColor color) override;
 
     private:
+        using ClipRect = std::array<int, 4>;
+
+        struct DrawState {
+            uint32_t texture;
+            BlendStyle style;
+            bool masked;
+            bool smooth;
+            uint32_t primitive;
+            std::optional<ClipRect> clip;
+
+            bool operator==(const DrawState&) const = default;
+        };
+
+        struct DrawBatch {
+            DrawState state;
+            int32_t first;
+        };
+
         void prepare(uint32_t texture, BlendStyle style, bool masked, bool smooth, uint32_t primitive);
+        void drawBatch(const DrawBatch& batch, int32_t count);
 
         UberShader& shader;
         TextureCache& textures;
         int viewWidth = 1;
         int viewHeight = 1;
-        bool clipping = false;
-        int clipRect[4] = {};
+        std::optional<ClipRect> clipRect;
         std::vector<GLVertex> vertices;
-        uint32_t currentTexture = 0;
-        BlendStyle currentStyle = BlendStyle::Normal;
-        bool currentMasked = false;
-        bool currentSmooth = true;
-        uint32_t currentPrimitive = 0;
+        std::vector<DrawBatch> batches;
         uint32_t nearestSampler = 0;
     };
 }

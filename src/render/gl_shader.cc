@@ -2,6 +2,10 @@
 
 #include <glad/gl.h>
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 #include <algorithm>
 #include <cstddef>
 #include <cstring>
@@ -11,6 +15,13 @@
 
 namespace dx {
     namespace {
+#ifdef __EMSCRIPTEN__
+        // Use the WebGL 2 heap-range overload to avoid making a JS view per upload.
+        EM_JS(void, uploadVertexBytes, (GLenum target, GLintptr offset, GLsizeiptr size, const void* data), {
+            GLctx.bufferSubData(target, offset >>> 0, HEAPU8, data >>> 0, size >>> 0);
+        });
+#endif
+
         const char* vertexSource = R"(#version 330 core
 layout(location = 0) in vec3 aPosition;
 layout(location = 1) in vec2 aUV;
@@ -158,6 +169,10 @@ void main()
     occlusionMask = vec4(uOcclusion);
     if ((uFlags & 32) != 0)
     {
+        if (vColor.a <= 0.0)
+        {
+            discard;
+        }
         fragColor = vec4(mix(vColor.rgb, texture(uTexture, vUV).rgb, vColor.a), 1.0);
         return;
     }
@@ -387,6 +402,64 @@ void main()
 }
 )";
 
+#ifdef __EMSCRIPTEN__
+        const char* rippleFragmentSource = R"(#version 330 core
+uniform sampler2D uHeights;
+uniform sampler2D uLookup;
+uniform sampler2D uSource;
+uniform ivec2 uSize;
+uniform bool uEven;
+uniform bool uWet;
+out vec4 fragColor;
+
+vec4 sampleCell(sampler2D dataTexture, ivec2 cell, ivec2 size)
+{
+    return texture(dataTexture, (vec2(cell) + 0.5) / vec2(size));
+}
+
+int byteValue(vec4 value)
+{
+    return int(value.r * 255.0 + 0.5);
+}
+
+int heightAt(int x, int y)
+{
+    ivec2 size = ivec2(uSize.x / 2, uSize.y);
+    return byteValue(sampleCell(uHeights, ivec2(x, y), size));
+}
+
+void main()
+{
+    ivec2 pixel = ivec2(gl_FragCoord.xy);
+    ivec2 shifted = (pixel + (uEven ? 1 : 0)) & (uSize - 1);
+    ivec2 cell = shifted / 2;
+    int x = cell.x + (uEven ? -3 : -2);
+    int line = cell.y * 2 + (uEven ? 0 : 1);
+    int hd = heightAt(x + 3, line + 1) - heightAt(x + 1, line + 1);
+    int slope = hd * 2;
+    if ((shifted.y & 1) == 0) {
+        int gc = heightAt(x + 3, line - 1) - heightAt(x + 1, line - 1);
+        int right = (gc + hd) >> 1;
+        slope = right * 2;
+        if ((shifted.x & 1) == 0) {
+            int ea = heightAt(x + 2, line - 1) - heightAt(x, line - 1);
+            int fb = heightAt(x + 2, line + 1) - heightAt(x, line + 1);
+            slope = right + ((fb + ea) >> 1);
+        }
+    } else if ((shifted.x & 1) == 0) {
+        int fb = heightAt(x + 2, line + 1) - heightAt(x, line + 1);
+        slope = fb + hd;
+    }
+    int lookup = slope + 512;
+    int index = byteValue(sampleCell(uLookup, ivec2(lookup & 255, 1 + lookup / 256), ivec2(256, 5)));
+    if (uWet) {
+        index = byteValue(sampleCell(uSource, ivec2(pixel.x + index, pixel.y), uSize));
+    }
+    fragColor = sampleCell(uLookup, ivec2(index, 0), ivec2(256, 5));
+}
+)";
+#endif
+
         GLuint compile(GLenum type, const char* source, const char* prefix = "")
         {
             GLuint shader = glCreateShader(type);
@@ -481,17 +554,31 @@ void main()
         }
         glUseProgram(programs[current]);
 
+#ifndef __EMSCRIPTEN__
         glGenVertexArrays(1, &streamVao);
         glGenBuffers(1, &streamVbo);
         glBindVertexArray(streamVao);
         glBindBuffer(GL_ARRAY_BUFFER, streamVbo);
         setupAttributes();
+#endif
     }
 
     UberShader::~UberShader()
     {
+#ifdef __EMSCRIPTEN__
+        for (const VertexFrame& frame : vertexFrames) {
+            if (frame.fence) {
+                glDeleteSync(frame.fence);
+            }
+            for (const VertexPage& page : frame.pages) {
+                glDeleteBuffers(1, &page.buffer);
+                glDeleteVertexArrays(1, &page.vao);
+            }
+        }
+#else
         glDeleteBuffers(1, &streamVbo);
         glDeleteVertexArrays(1, &streamVao);
+#endif
         glDeleteProgram(programs[0]);
         glDeleteProgram(programs[1]);
     }
@@ -707,6 +794,7 @@ void main()
         glActiveTexture(GL_TEXTURE0);
     }
 
+#ifndef __EMSCRIPTEN__
     int32_t UberShader::stream(const std::vector<GLVertex>& vertices)
     {
         size_t bytes = vertices.size() * sizeof(GLVertex);
@@ -717,37 +805,109 @@ void main()
             glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(streamCapacity), nullptr, GL_STREAM_DRAW);
             streamOffset = 0;
         }
-#ifdef __EMSCRIPTEN__
-        glBufferSubData(GL_ARRAY_BUFFER, static_cast<GLintptr>(streamOffset), static_cast<GLsizeiptr>(bytes), vertices.data());
-#else
         void* target = glMapBufferRange(GL_ARRAY_BUFFER, static_cast<GLintptr>(streamOffset), static_cast<GLsizeiptr>(bytes), GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_RANGE_BIT | GL_MAP_UNSYNCHRONIZED_BIT);
         std::memcpy(target, vertices.data(), bytes);
         glUnmapBuffer(GL_ARRAY_BUFFER);
-#endif
         int32_t first = static_cast<int32_t>(streamOffset / sizeof(GLVertex));
         streamOffset += bytes;
         return first;
     }
+#endif
 
     void UberShader::draw(const std::vector<GLVertex>& vertices, uint32_t primitive)
     {
         if (vertices.empty()) {
             return;
         }
+#ifdef __EMSCRIPTEN__
+        VertexRange range = uploadVertexBatch(vertices);
+        glBindVertexArray(range.vao);
+        int32_t first = range.first;
+#else
         int32_t first = stream(vertices);
+#endif
         glDrawArrays(primitive, first, static_cast<GLsizei>(vertices.size()));
     }
 
     void UberShader::upload(const std::vector<GLVertex>& vertices)
     {
+#ifdef __EMSCRIPTEN__
+        uploadedVertices = uploadVertexBatch(vertices);
+#else
         uploadBase = stream(vertices);
+#endif
     }
 
-    void UberShader::drawRange(int32_t first, int32_t count)
+    void UberShader::drawRange(int32_t first, int32_t count, uint32_t primitive)
     {
+#ifdef __EMSCRIPTEN__
+        glBindVertexArray(uploadedVertices.vao);
+        glDrawArrays(primitive, uploadedVertices.first + first, count);
+#else
         glBindVertexArray(streamVao);
-        glDrawArrays(GL_TRIANGLES, uploadBase + first, count);
+        glDrawArrays(primitive, uploadBase + first, count);
+#endif
     }
+
+#ifdef __EMSCRIPTEN__
+    void UberShader::beginVertexFrame()
+    {
+        vertexFrameIndex = 1 - vertexFrameIndex;
+        VertexFrame& frame = vertexFrames[vertexFrameIndex];
+        bool busy = false;
+        if (frame.fence) {
+            GLenum status = glClientWaitSync(frame.fence, 0, 0);
+            busy = status != GL_ALREADY_SIGNALED && status != GL_CONDITION_SATISFIED;
+            glDeleteSync(frame.fence);
+            frame.fence = nullptr;
+        }
+        for (VertexPage& page : frame.pages) {
+            if (busy && page.offset != 0) {
+                // Give new draws fresh storage while earlier draws finish.
+                glBindBuffer(GL_ARRAY_BUFFER, page.buffer);
+                glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(page.capacity), nullptr, GL_STREAM_DRAW);
+            }
+            page.offset = 0;
+        }
+    }
+
+    VertexRange UberShader::uploadVertexBatch(const std::vector<GLVertex>& vertices)
+    {
+        constexpr size_t minimumPageCapacity = size_t { 2 } << 20;
+        const size_t bytes = vertices.size() * sizeof(GLVertex);
+        auto& pages = vertexFrames[vertexFrameIndex].pages;
+        auto available = std::find_if(pages.begin(), pages.end(), [bytes](const VertexPage& page) {
+            return bytes <= page.capacity - page.offset;
+        });
+        if (available == pages.end()) {
+            VertexPage& page = pages.emplace_back();
+            page.capacity = std::max(minimumPageCapacity, bytes);
+            glGenVertexArrays(1, &page.vao);
+            glGenBuffers(1, &page.buffer);
+            glBindVertexArray(page.vao);
+            glBindBuffer(GL_ARRAY_BUFFER, page.buffer);
+            setupAttributes();
+            glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(page.capacity), nullptr, GL_STREAM_DRAW);
+            available = std::prev(pages.end());
+        } else {
+            glBindBuffer(GL_ARRAY_BUFFER, available->buffer);
+        }
+        VertexPage& page = *available;
+        uploadVertexBytes(GL_ARRAY_BUFFER, static_cast<GLintptr>(page.offset), static_cast<GLsizeiptr>(bytes), vertices.data());
+
+        VertexRange range { page.vao, static_cast<int32_t>(page.offset / sizeof(GLVertex)) };
+        page.offset += bytes;
+        return range;
+    }
+
+    void UberShader::endVertexFrame()
+    {
+        VertexFrame& frame = vertexFrames[vertexFrameIndex];
+        if (std::any_of(frame.pages.begin(), frame.pages.end(), [](const VertexPage& page) { return page.offset != 0; })) {
+            frame.fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+        }
+    }
+#endif
 
     uint32_t UberShader::createStatic(const std::vector<GLVertex>& vertices, uint32_t& buffer)
     {
@@ -781,6 +941,89 @@ void main()
         }
         glMultiDrawArrays(GL_TRIANGLES, firsts, counts, ranges);
     }
+
+#ifdef __EMSCRIPTEN__
+    RipplePass::RipplePass()
+    {
+        program = linkFullscreen(rippleFragmentSource);
+        glGenFramebuffers(1, &framebuffer);
+        glGenVertexArrays(1, &vao);
+        GLint savedProgram = 0;
+        glGetIntegerv(GL_CURRENT_PROGRAM, &savedProgram);
+        glUseProgram(program);
+        glUniform1i(glGetUniformLocation(program, "uHeights"), 2);
+        glUniform1i(glGetUniformLocation(program, "uLookup"), 3);
+        glUniform1i(glGetUniformLocation(program, "uSource"), 4);
+        sizeLocation = glGetUniformLocation(program, "uSize");
+        parityLocation = glGetUniformLocation(program, "uEven");
+        wetLocation = glGetUniformLocation(program, "uWet");
+        glUseProgram(static_cast<GLuint>(savedProgram));
+    }
+
+    RipplePass::~RipplePass()
+    {
+        glDeleteProgram(program);
+        glDeleteFramebuffers(1, &framebuffer);
+        glDeleteVertexArrays(1, &vao);
+    }
+
+    void RipplePass::render(uint32_t output, uint32_t heights, uint32_t lookup, uint32_t source, int32_t width, int32_t height, bool even)
+    {
+        GLint savedProgram = 0;
+        GLint savedVao = 0;
+        GLint savedFramebuffer = 0;
+        GLint savedViewport[4] = {};
+        GLint savedActive = 0;
+        GLboolean savedColorMask[4] = {};
+        glGetIntegerv(GL_CURRENT_PROGRAM, &savedProgram);
+        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &savedVao);
+        glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &savedFramebuffer);
+        glGetIntegerv(GL_VIEWPORT, savedViewport);
+        glGetIntegerv(GL_ACTIVE_TEXTURE, &savedActive);
+        glGetBooleanv(GL_COLOR_WRITEMASK, savedColorMask);
+        constexpr GLenum capabilities[] = { GL_BLEND, GL_DEPTH_TEST, GL_CULL_FACE, GL_SCISSOR_TEST, GL_DITHER };
+        GLboolean enabled[std::size(capabilities)] = {};
+        for (size_t i = 0; i < std::size(capabilities); i++) {
+            enabled[i] = glIsEnabled(capabilities[i]);
+            glDisable(capabilities[i]);
+        }
+        const GLuint inputs[] = { heights, lookup, source ? source : heights };
+        GLint savedTextures[std::size(inputs)] = {};
+        for (size_t i = 0; i < std::size(inputs); i++) {
+            glActiveTexture(GL_TEXTURE2 + static_cast<GLenum>(i));
+            glGetIntegerv(GL_TEXTURE_BINDING_2D, &savedTextures[i]);
+            glBindTexture(GL_TEXTURE_2D, inputs[i]);
+        }
+
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
+        glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, output, 0);
+        glViewport(0, 0, width, height);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        glUseProgram(program);
+        glUniform2i(sizeLocation, width, height);
+        glUniform1i(parityLocation, even ? 1 : 0);
+        glUniform1i(wetLocation, source ? 1 : 0);
+        glBindVertexArray(vao);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
+
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(savedFramebuffer));
+        glViewport(savedViewport[0], savedViewport[1], savedViewport[2], savedViewport[3]);
+        glColorMask(savedColorMask[0], savedColorMask[1], savedColorMask[2], savedColorMask[3]);
+        glUseProgram(static_cast<GLuint>(savedProgram));
+        glBindVertexArray(static_cast<GLuint>(savedVao));
+        for (size_t i = 0; i < std::size(inputs); i++) {
+            glActiveTexture(GL_TEXTURE2 + static_cast<GLenum>(i));
+            glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(savedTextures[i]));
+        }
+        glActiveTexture(static_cast<GLenum>(savedActive));
+        for (size_t i = 0; i < std::size(capabilities); i++) {
+            if (enabled[i]) {
+                glEnable(capabilities[i]);
+            }
+        }
+    }
+#endif
 
     GammaPass::GammaPass()
     {

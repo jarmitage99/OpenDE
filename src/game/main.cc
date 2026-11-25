@@ -685,9 +685,14 @@ namespace {
             dx::deusex::insertMenuButton(settings, 5, "Extra Graphics", screen);
         }
 
+#ifdef DX_NETWORKING
         void addBotsChoice()
         {
-            dx::UClass* choice = dx::objects::createSubclass(dx::objects::findClass("DeusEx.MenuChoice_ServerMode"), dx::Name("MenuChoice_Bots"));
+            dx::UClass* serverMode = dx::objects::findClass("DeusEx.MenuChoice_ServerMode");
+            if (!serverMode) {
+                return;
+            }
+            dx::UClass* choice = dx::objects::createSubclass(serverMode, dx::Name("MenuChoice_Bots"));
             dx::UObject* defaults = choice->defaultObject;
             *reinterpret_cast<std::string*>(defaults->propertyAddress(dx::Name("actionText"))) = "|&Bots";
             *reinterpret_cast<std::string*>(defaults->propertyAddress(dx::Name("helpText"))) = "Number of computer controlled players that join the game you host.";
@@ -708,6 +713,7 @@ namespace {
                 *reinterpret_cast<int32_t*>(host->propertyAddress(dx::Name("ServerMode"))) = 1;
             }
         }
+#endif
 
         void addPlayerSpeedChoice(dx::UClass* screen, int index)
         {
@@ -929,7 +935,9 @@ namespace {
             loadDeusExClasses();
             addFieldOfViewChoice();
             addExtraOptions();
+#ifdef DX_NETWORKING
             addBotsChoice();
+#endif
             std::string map = options.map;
             std::filesystem::path mapFile = map;
             if (mapFile.has_parent_path() && std::filesystem::is_regular_file(mapFile)) {

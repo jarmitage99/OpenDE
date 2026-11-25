@@ -58,6 +58,11 @@ namespace dx {
         void draw(const std::vector<GLVertex>& vertices, Primitive primitive) override;
         void upload(const std::vector<GLVertex>& vertices) override;
         void drawRange(int32_t first, int32_t count) override;
+#ifdef __EMSCRIPTEN__
+        void beginVertexFrame() override;
+        VertexRange uploadVertexBatch(const std::vector<GLVertex>& vertices) override;
+        void endVertexFrame() override;
+#endif
         uint32_t createStatic(const std::vector<GLVertex>& vertices) override;
         void deleteStatic(uint32_t geometry) override;
         void bindStatic(uint32_t geometry) override;
