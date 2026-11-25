@@ -93,6 +93,9 @@ namespace dx {
             int32_t first = 0;
             int32_t count = 0;
             std::vector<Vector> hull;
+            std::vector<GLVertex> vertices;
+            Vector center;
+            float radius = 0;
         };
 
         struct NodeEmit {
@@ -293,6 +296,8 @@ namespace dx {
         void applyClip(const View& view);
         void drawSky(const View& frame, const std::vector<UObject*>& actors, UObject* viewActor);
         void markMirror(const View& view, const MirrorSurface& mirror);
+        void collectMoverMirrors(const std::vector<UObject*>& actors);
+        void drawMoverMirrorDepth(const View& view);
         void collectVolumetrics(const View& view);
         bool surfaceFog(int32_t surfIndex, const View& view);
         void drawFog(const Batch& batch, const View& view, int32_t onlyNode);
@@ -398,6 +403,7 @@ namespace dx {
         std::map<std::pair<UObject*, UMesh*>, MeshPoseCaches> poseCaches;
         std::map<std::tuple<UObject*, UMesh*, UObject*>, MeshDrawCache> meshDrawCaches;
         std::unordered_map<UObject*, BrushDrawCache> brushDrawCaches;
+        std::vector<MirrorSurface> moverMirrors;
         std::unordered_map<UObject*, OcclusionState> occlusion;
         std::vector<UObject*> scratchCandidates;
         std::vector<UObject*> scratchDecals;

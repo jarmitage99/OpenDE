@@ -55,7 +55,7 @@ namespace dx {
     constexpr int32_t SHADER_Detail = 32;
     constexpr int32_t SHADER_Fog = 64;
     constexpr int32_t SHADER_Fullbright = 128;
-    constexpr size_t MaxDynamicLights = 8;
+    constexpr size_t MaxDynamicLights = 32;
 
     enum class BlendMode : uint8_t {
         Opaque,

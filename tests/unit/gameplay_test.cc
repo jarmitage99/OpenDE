@@ -824,3 +824,32 @@ TEST_CASE("with vanilla bug fixes off a stunned terrorist attacks as soon as it 
     dx::deusex::applyVanillaFixes();
     releaseWorld(world, "01_NYC_UNATCOIsland");
 }
+
+TEST_CASE("the Smuggler's stash mirror shatters into glass only with vanilla bug fixes on", "[data]")
+{
+    std::string section = dx::config::system().get("Engine.Engine", "GameEngine").value_or("DeusEx.DeusExGameEngine");
+    for (bool fixes : { true, false }) {
+        dx::config::system().set(section, "FixVanillaBugs", fixes ? "True" : "False");
+        std::unique_ptr<dx::World> world = freshWorld("02_NYC_Smug");
+        dx::UObject* mirror = findActor(*world, "DeusExMover7");
+        REQUIRE(mirror != nullptr);
+        dx::vm::Call shot(mirror, dx::Name("TakeDamage"));
+        shot.i(100).obj(world->player()).v(dx::actor::Location(mirror)).v({}).n(dx::Name("Shot")).run();
+        tick(*world, 1);
+        int glass = 0;
+        int wood = 0;
+        for (dx::UObject* a : world->actors) {
+            if (a && !a->destroyed && a->cls->name == dx::Name("GlassFragment")) {
+                glass++;
+            }
+            if (a && !a->destroyed && a->cls->name == dx::Name("WoodFragment")) {
+                wood++;
+            }
+        }
+        CHECK(glass == (fixes ? 16 : 0));
+        CHECK(wood == (fixes ? 0 : 16));
+        releaseWorld(world, "02_NYC_Smug");
+    }
+    dx::config::system().set(section, "FixVanillaBugs", "True");
+    dx::deusex::applyVanillaFixes();
+}
