@@ -59,7 +59,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: deusex-windows-unit-tests
-          path: build-mingw/bin/unit-tests.exe
+          path: |
+            build-mingw/bin/unit-tests.exe
+            tests/unit/fixtures
           if-no-files-found: error
 
   unit-tests:
@@ -75,8 +77,10 @@ jobs:
 
       - name: Unit tests
         shell: pwsh
+        env:
+          TEST_FIXTURES: tests/unit/fixtures
         run: |
-          ./unit-tests.exe "~[data]"
+          ./build-mingw/bin/unit-tests.exe "~[data]"
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
           }

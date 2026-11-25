@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <string>
@@ -1171,14 +1172,22 @@ namespace {
         }
         return result;
     }
+
+    std::filesystem::path fixtures()
+    {
+        if (const char* value = std::getenv("TEST_FIXTURES")) {
+            return std::filesystem::path(value);
+        }
+        return std::filesystem::path(TEST_FIXTURES);
+    }
 }
 
 TEST_CASE("ogg music plays the intro once, then loops, and resumes the loop at a position")
 {
     REQUIRE(dx::audio::initializeOffline(44100));
     dx::audio::setVolumes(1.0f, 1.0f, 1.0f);
-    std::filesystem::path intro = std::filesystem::path(TEST_FIXTURES) / "intro.ogg";
-    std::filesystem::path loop = std::filesystem::path(TEST_FIXTURES) / "loop.ogg";
+    std::filesystem::path intro = fixtures() / "intro.ogg";
+    std::filesystem::path loop = fixtures() / "loop.ogg";
     dx::audio::playOgg(nullptr, intro, loop, 0.0f, 1);
     std::vector<float> buffer(11025 * 2);
     dx::audio::render(buffer.data(), 11025);
@@ -1206,7 +1215,7 @@ TEST_CASE("a fading ogg request fades the playing track out before switching")
 {
     REQUIRE(dx::audio::initializeOffline(44100));
     dx::audio::setVolumes(1.0f, 1.0f, 1.0f);
-    std::filesystem::path loop = std::filesystem::path(TEST_FIXTURES) / "loop.ogg";
+    std::filesystem::path loop = fixtures() / "loop.ogg";
     dx::audio::playOgg(nullptr, {}, loop, 0.0f, 1);
     dx::audio::playOgg(nullptr, {}, {}, 0.0f, 3);
     std::vector<float> start(4410 * 2);
