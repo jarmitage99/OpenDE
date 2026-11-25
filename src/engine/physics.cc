@@ -347,13 +347,21 @@ namespace dx {
                 Vector subLocation = actor::Location(a);
                 Vector subMove = delta;
                 bool zeroMove = delta.sizeSquared() < 1e-6f;
-                Vector ladderDir = accelDir.zero() ? rotationAxes(actor::Rotation(a)).xAxis : accelDir;
+                Vector facing = rotationAxes(actor::Rotation(a)).xAxis;
+                Vector ladderDir = accelDir.zero() ? facing : accelDir;
                 if (ladderAhead(a, ladderDir)) {
                     if (zeroMove || accelDir.zero()) {
                         remaining = 0;
                         continue;
                     }
                     climbLadder(a, tick, std::max(desiredMove.size(), pawn::GroundSpeed(a) * 0.5f) * 0.5f);
+                    move(a, delta, hit);
+                    if (a->destroyed) {
+                        return;
+                    }
+                    continue;
+                }
+                if (!zeroMove && !accelDir.zero() && ladderAhead(a, facing)) {
                     move(a, delta, hit);
                     if (a->destroyed) {
                         return;

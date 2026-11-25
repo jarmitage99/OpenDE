@@ -605,6 +605,37 @@ TEST_CASE("moving the player into a datalink trigger with SetLocation starts its
     releaseWorld(world, "01_NYC_UNATCOIsland");
 }
 
+TEST_CASE("player strafes along a ladder and drops only past its edge", "[data]")
+{
+    std::unique_ptr<dx::World> world = freshWorld("01_NYC_UNATCOIsland");
+    dx::UObject* player = world->player();
+    REQUIRE(player != nullptr);
+    dx::console::execute(player, "teleport 6040 -1742 260 16384");
+    tick(*world, 10);
+    float startZ = dx::actor::Location(player).z;
+    uint8_t forward = dx::console::keyFromName("W");
+    dx::console::key(forward, dx::IST_Press, 0);
+    tick(*world, 30);
+    dx::console::key(forward, dx::IST_Release, 0);
+    dx::Vector held = dx::actor::Location(player);
+    REQUIRE(held.z - startZ > 60.0f);
+    uint8_t right = dx::console::keyFromName("D");
+    dx::console::key(right, dx::IST_Press, 0);
+    tick(*world, 2);
+    dx::console::key(right, dx::IST_Release, 0);
+    tick(*world, 10);
+    dx::Vector strafed = dx::actor::Location(player);
+    CHECK(std::abs(strafed.x - held.x) > 2.0f);
+    CHECK(strafed.z == Catch::Approx(held.z).margin(1.0f));
+    CHECK(dx::actor::Physics(player) == 1);
+    dx::console::key(right, dx::IST_Press, 0);
+    tick(*world, 60);
+    dx::console::key(right, dx::IST_Release, 0);
+    tick(*world, 30);
+    CHECK(dx::actor::Location(player).z < held.z - 40.0f);
+    releaseWorld(world, "01_NYC_UNATCOIsland");
+}
+
 TEST_CASE("player climbs the rung ladder out of the pit under the satcom hatch", "[data]")
 {
     std::unique_ptr<dx::World> world = freshWorld("01_NYC_UNATCOIsland");
@@ -825,31 +856,25 @@ TEST_CASE("with vanilla bug fixes off a stunned terrorist attacks as soon as it 
     releaseWorld(world, "01_NYC_UNATCOIsland");
 }
 
-TEST_CASE("the Smuggler's stash mirror shatters into glass only with vanilla bug fixes on", "[data]")
+TEST_CASE("the Smuggler's stash mirror shatters into glass", "[data]")
 {
-    std::string section = dx::config::system().get("Engine.Engine", "GameEngine").value_or("DeusEx.DeusExGameEngine");
-    for (bool fixes : { true, false }) {
-        dx::config::system().set(section, "FixVanillaBugs", fixes ? "True" : "False");
-        std::unique_ptr<dx::World> world = freshWorld("02_NYC_Smug");
-        dx::UObject* mirror = findActor(*world, "DeusExMover7");
-        REQUIRE(mirror != nullptr);
-        dx::vm::Call shot(mirror, dx::Name("TakeDamage"));
-        shot.i(100).obj(world->player()).v(dx::actor::Location(mirror)).v({}).n(dx::Name("Shot")).run();
-        tick(*world, 1);
-        int glass = 0;
-        int wood = 0;
-        for (dx::UObject* a : world->actors) {
-            if (a && !a->destroyed && a->cls->name == dx::Name("GlassFragment")) {
-                glass++;
-            }
-            if (a && !a->destroyed && a->cls->name == dx::Name("WoodFragment")) {
-                wood++;
-            }
+    std::unique_ptr<dx::World> world = freshWorld("02_NYC_Smug");
+    dx::UObject* mirror = findActor(*world, "DeusExMover7");
+    REQUIRE(mirror != nullptr);
+    dx::vm::Call shot(mirror, dx::Name("TakeDamage"));
+    shot.i(100).obj(world->player()).v(dx::actor::Location(mirror)).v({}).n(dx::Name("Shot")).run();
+    tick(*world, 1);
+    int glass = 0;
+    int wood = 0;
+    for (dx::UObject* a : world->actors) {
+        if (a && !a->destroyed && a->cls->name == dx::Name("GlassFragment")) {
+            glass++;
         }
-        CHECK(glass == (fixes ? 16 : 0));
-        CHECK(wood == (fixes ? 0 : 16));
-        releaseWorld(world, "02_NYC_Smug");
+        if (a && !a->destroyed && a->cls->name == dx::Name("WoodFragment")) {
+            wood++;
+        }
     }
-    dx::config::system().set(section, "FixVanillaBugs", "True");
-    dx::deusex::applyVanillaFixes();
+    CHECK(glass == 16);
+    CHECK(wood == 0);
+    releaseWorld(world, "02_NYC_Smug");
 }

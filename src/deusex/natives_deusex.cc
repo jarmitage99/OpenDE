@@ -1153,7 +1153,7 @@ namespace dx {
             UClass* moverClass = objects::findClass("DeusEx.DeusExMover");
             UClass* woodClass = objects::findClass("DeusEx.WoodFragment");
             UClass* glassClass = objects::findClass("DeusEx.GlassFragment");
-            if (!vanillaFixes || !moverClass || !woodClass || !glassClass) {
+            if (!moverClass || !woodClass || !glassClass) {
                 return;
             }
             for (UObject* a : world.actors) {
