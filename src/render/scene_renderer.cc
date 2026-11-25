@@ -326,6 +326,9 @@ namespace dx {
         frameHeight = std::max(height, 1);
         viewAspect = static_cast<float>(frameWidth) / static_cast<float>(frameHeight);
         device->beginTextureFrame(currentTime);
+#ifdef __EMSCRIPTEN__
+        device->beginVertexFrame();
+#endif
         offscreen = device->drawingToWindow() && std::abs(gammaExponent - 1.0f) >= 0.0001f;
         if (offscreen) {
             device->bindGammaTarget(frameWidth, frameHeight);
@@ -339,6 +342,9 @@ namespace dx {
     void SceneRenderer::endFrame()
     {
         device->flushCanvas();
+#ifdef __EMSCRIPTEN__
+        device->endVertexFrame();
+#endif
         device->setBlend(BlendMode::Opaque);
     }
 
@@ -515,6 +521,8 @@ namespace dx {
         if (!model || model->nodes.empty()) {
             return;
         }
+        // Overlapping mirrors need the original front-to-back occluders.
+        const bool specialOnly = view.zoneOnly && !(view.zoneMask & levelData.mirrorZones);
         if (open) {
             spans.reset(viewportWidth, viewportHeight, *open);
         } else {
@@ -566,6 +574,9 @@ namespace dx {
                     return false;
                 }
             }
+            if (specialOnly) {
+                return true;
+            }
             float left = std::numeric_limits<float>::max();
             float right = std::numeric_limits<float>::lowest();
             float top = std::numeric_limits<float>::max();
@@ -606,13 +617,26 @@ namespace dx {
                 return;
             }
             bool drawn = false;
+            bool fog = false;
             for (int32_t e = levelData.nodeEmitStart[static_cast<size_t>(index)]; e < levelData.nodeEmitStart[static_cast<size_t>(index) + 1]; e++) {
-                if (view.zoneMask & (1ull << (levelData.batches[static_cast<size_t>(levelData.nodeEmits[static_cast<size_t>(e)].batch)].zone & 63))) {
+                const Batch& batch = levelData.batches[static_cast<size_t>(levelData.nodeEmits[static_cast<size_t>(e)].batch)];
+                if (view.zoneMask & (1ull << (batch.zone & 63))) {
                     drawn = true;
-                    break;
+                    fog = fog || batch.fogZone;
+                    if (!specialOnly || fog) {
+                        break;
+                    }
                 }
             }
             if (!drawn) {
+                return;
+            }
+            bool backdrop = (flags & PF_FakeBackdrop) && levelData.hasBackdrop;
+            if (specialOnly && !backdrop) {
+                if (fog) {
+                    visibility->nodes.push_back(index);
+                    visibility->nodeSequence.push_back(sequence++);
+                }
                 return;
             }
             Vector* input = clipA;
@@ -646,7 +670,6 @@ namespace dx {
                 screen[i] = project(input[i]);
             }
             int32_t mirror = mirrorsActive && (flags & PF_Mirrored) ? levelData.nodeMirror[static_cast<size_t>(index)] : -1;
-            bool backdrop = (flags & PF_FakeBackdrop) && levelData.hasBackdrop;
             scratchSpans.clear();
             if (!spans.polygonVisible(screen, count, (mirror >= 0 || backdrop) ? &scratchSpans : nullptr)) {
                 return;
@@ -660,7 +683,7 @@ namespace dx {
                 visibility->backdropSpans.insert(visibility->backdropSpans.end(), scratchSpans.begin(), scratchSpans.end());
             }
             bool occluder = mirror >= 0 || backdrop || !(flags & (PF_Masked | PF_Translucent | PF_Modulated | PF_Invisible | PF_Portal));
-            if (occluder && (side > 0 || twoSided)) {
+            if (!specialOnly && occluder && (side > 0 || twoSided)) {
                 pendingCounts.push_back(count);
                 pendingPoints.insert(pendingPoints.end(), screen, screen + count);
             }
@@ -745,6 +768,9 @@ namespace dx {
         for (int32_t node : visibility.nodes) {
             levelData.nodeStamp[static_cast<size_t>(node)] = visibleStamp;
             levelData.surfStamp[static_cast<size_t>(model->nodes[static_cast<size_t>(node)].surf)] = visibleStamp;
+            if (view.zoneOnly) {
+                continue;
+            }
             for (int32_t e = levelData.nodeEmitStart[static_cast<size_t>(node)]; e < levelData.nodeEmitStart[static_cast<size_t>(node) + 1]; e++) {
                 const NodeEmit& emit = levelData.nodeEmits[static_cast<size_t>(e)];
                 std::vector<std::array<int32_t, 3>>& ranges = levelData.batchRanges[static_cast<size_t>(emit.batch)];
@@ -1093,6 +1119,22 @@ namespace dx {
             }
             batch.first = static_cast<int32_t>(all.size());
             batch.count = static_cast<int32_t>(vertices.size());
+            if (isTranslucentFlags(batch.polyFlags)) {
+                for (const auto& range : nodeRanges[key]) {
+                    Vector center {};
+                    for (int32_t i = range[0]; i < range[0] + range[1]; i++) {
+                        const GLVertex& vertex = vertices[static_cast<size_t>(i)];
+                        center = center + Vector { vertex.x, vertex.y, vertex.z };
+                    }
+                    batch.translucentCenters.push_back(center / static_cast<float>(range[1]));
+                }
+            }
+            if (batch.fogZone || (batch.polyFlags & (PF_FakeBackdrop | PF_Mirrored))) {
+                levelData.visibilityZones |= 1ull << (batch.zone & 63);
+            }
+            if (batch.polyFlags & PF_Mirrored) {
+                levelData.mirrorZones |= 1ull << (batch.zone & 63);
+            }
             batch.boundsMin = { vertices[0].x, vertices[0].y, vertices[0].z };
             batch.boundsMax = batch.boundsMin;
             for (const GLVertex& vertex : vertices) {
@@ -1215,6 +1257,19 @@ namespace dx {
         }
     }
 
+    const std::vector<size_t>& SceneRenderer::batchesInZones(uint64_t zones)
+    {
+        auto [entry, inserted] = levelData.zoneBatches.try_emplace(zones);
+        if (inserted) {
+            for (size_t i = 0; i < levelData.batches.size(); i++) {
+                if (zones & (1ull << (levelData.batches[i].zone & 63))) {
+                    entry->second.push_back(i);
+                }
+            }
+        }
+        return entry->second;
+    }
+
     void SceneRenderer::applyBlend(uint32_t polyFlags, int32_t extraFlags)
     {
         int32_t flags = SHADER_Textured | extraFlags;
@@ -1239,7 +1294,40 @@ namespace dx {
         }
     }
 
-    void SceneRenderer::drawLevelGeometry(const View& view, bool translucentPass)
+    void SceneRenderer::collectTranslucentSurfaces(const View& view, std::vector<TranslucentDraw>& draws)
+    {
+        auto collectBatch = [&](size_t index) {
+            const Batch& batch = levelData.batches[index];
+            if (!isTranslucentFlags(batch.polyFlags) || !(view.zoneMask & (1ull << (batch.zone & 63))) ||
+                ((batch.polyFlags & PF_FakeBackdrop) && levelData.hasBackdrop)) {
+                return;
+            }
+            if (view.zoneOnly) {
+                for (size_t i = 0; i < batch.nodePolys.size(); i++) {
+                    const auto& [first, count, node] = batch.nodePolys[i];
+                    float depth = (batch.translucentCenters[i] - view.location).dot(view.axes.xAxis);
+                    draws.push_back({ 0, depth, &batch, nullptr, first, count, node });
+                }
+                return;
+            }
+            auto& ranges = levelData.batchRanges[index];
+            std::sort(ranges.begin(), ranges.end());
+            for (const auto& [first, count, node] : ranges) {
+                draws.push_back({ nodeOrder[static_cast<size_t>(node)], 0, &batch, nullptr, first, count, node });
+            }
+        };
+        if (view.zoneOnly) {
+            for (size_t index : batchesInZones(view.zoneMask)) {
+                collectBatch(index);
+            }
+        } else {
+            for (size_t index = 0; index < levelData.batches.size(); index++) {
+                collectBatch(index);
+            }
+        }
+    }
+
+    void SceneRenderer::drawOpaqueLevelGeometry(const View& view)
     {
         if (!levelData.vao) {
             return;
@@ -1252,34 +1340,40 @@ namespace dx {
         device->setDepthFunc(DepthFunc::LessEqual);
         device->setFrontFace(!view.mirrored);
         device->bindStatic(levelData.vao);
-        if (!translucentPass) {
+        if (!view.zoneOnly || view.visibility) {
             gatherVisible(view);
-            lightmaps.animate(levelData.model, static_cast<float>(time), static_cast<uint64_t>(lightFrameCount), [&](size_t surf, uint64_t zones) {
-                return (view.zoneMask & zones) && levelData.surfStamp[surf] == visibleStamp;
-            });
         }
+        lightmaps.animate(levelData.model, static_cast<float>(time), static_cast<uint64_t>(lightFrameCount), [&](size_t surf, uint64_t zones) {
+            return (view.zoneMask & zones) && (view.zoneOnly || levelData.surfStamp[surf] == visibleStamp);
+        });
         bool skyActive = levelData.hasBackdrop;
         bool mirrorsActive = view.recursion < MaxFrameRecursion - 1;
-        if (translucentPass) {
-            std::vector<TranslucentSurface>& surfaces = scratchTranslucentSurfaces;
-            surfaces.clear();
-            for (size_t index = 0; index < levelData.batches.size(); index++) {
+        if (view.zoneOnly) {
+            const auto& batches = batchesInZones(view.zoneMask);
+            // Lay down the sky and mirror depth masks before any world color.
+            for (size_t index : batches) {
                 const Batch& batch = levelData.batches[index];
-                std::vector<std::array<int32_t, 3>>& ranges = levelData.batchRanges[index];
-                if (ranges.empty() || !isTranslucentFlags(batch.polyFlags) || !(view.zoneMask & (1ull << (batch.zone & 63)))) {
-                    continue;
-                }
-                if ((batch.polyFlags & PF_FakeBackdrop) && skyActive) {
-                    continue;
-                }
-                std::sort(ranges.begin(), ranges.end());
-                for (const auto& [first, count, node] : ranges) {
-                    surfaces.push_back({ nodeOrder[static_cast<size_t>(node)], &batch, first, count, node });
+                if (mirrorsActive && (batch.polyFlags & PF_Mirrored)) {
+                    device->setBlend(BlendMode::Opaque);
+                    device->setFlags(0);
+                    device->setCulling(!(batch.polyFlags & PF_TwoSided));
+                    device->setColorWrite(false);
+                    device->drawStatic(levelData.vao, batch.first, batch.count);
+                    device->setColorWrite(true);
+                } else if (skyActive && (batch.polyFlags & PF_FakeBackdrop) && !isTranslucentFlags(batch.polyFlags)) {
+                    drawBatch(batch, view, &batch.first, &batch.count, 1, -1, uploadedLights);
                 }
             }
-            std::stable_sort(surfaces.begin(), surfaces.end(), [](const TranslucentSurface& a, const TranslucentSurface& b) {
-                return a.order < b.order;
-            });
+            for (size_t index : batches) {
+                const Batch& batch = levelData.batches[index];
+                if (isTranslucentFlags(batch.polyFlags) || (mirrorsActive && (batch.polyFlags & PF_Mirrored)) ||
+                    (skyActive && (batch.polyFlags & PF_FakeBackdrop))) {
+                    continue;
+                }
+                drawBatch(batch, view, &batch.first, &batch.count, 1, -1, uploadedLights);
+            }
+            device->setPan(0, 0);
+            device->setScale(1, 1);
             return;
         }
         auto collectRanges = [&](int32_t index) {
@@ -1425,13 +1519,12 @@ namespace dx {
     {
         device->useShader();
         applyClip(view);
-        drawLevelGeometry(view, false);
+        drawOpaqueLevelGeometry(view);
         drawActors(actors, view, viewActor, occlude);
         if (view.recursion == 0) {
             device->applyOcclusion(sceneNearPlane, sceneFarPlane, view.tanHalfWidth, view.tanHalfHeight);
         }
-        drawLevelGeometry(view, true);
-        flushTranslucent(view);
+        flushTranslucent(view, true);
         if (view.clipCount) {
             View plain;
             applyClip(plain);
@@ -1462,10 +1555,9 @@ namespace dx {
         device->useShader();
         View plain;
         applyClip(plain);
-        drawLevelGeometry(sky, false);
+        drawOpaqueLevelGeometry(sky);
         drawActors(actors, sky, viewActor, false);
-        drawLevelGeometry(sky, true);
-        flushTranslucent(sky);
+        flushTranslucent(sky, true);
     }
 
     void SceneRenderer::markMirror(const View& view, const MirrorSurface& mirror)
@@ -1698,18 +1790,24 @@ namespace dx {
         levelData.fogFrame[index] = fogStamp;
         levelData.fogged[index] = 0;
         FogCache& cache = levelData.fogCache[index];
+        if (view.zoneOnly && cache.valid && cache.zoneView &&
+            static_cast<uint64_t>(lightFrameCount) % DynamicTextureUpdatePeriod != index % DynamicTextureUpdatePeriod) {
+            levelData.fogged[index] = cache.fogged ? 1 : 0;
+            return cache.fogged;
+        }
         int32_t count = 0;
         for (int32_t node : levelData.surfNodes[index]) {
             if (levelData.nodeStamp[static_cast<size_t>(node)] == visibleStamp) {
                 count = std::max(count, levelData.nodeVolumetrics[static_cast<size_t>(node)]);
             }
         }
-        if (cache.valid && cache.signature == volumetricSignature && cache.count == count && sameVector(cache.eye, view.location)) {
+        if (cache.valid && cache.zoneView == view.zoneOnly && cache.signature == volumetricSignature && cache.count == count && sameVector(cache.eye, view.location)) {
             levelData.fogged[index] = cache.fogged ? 1 : 0;
             return cache.fogged;
         }
         cache.valid = true;
         cache.fogged = false;
+        cache.zoneView = view.zoneOnly;
         cache.signature = volumetricSignature;
         cache.eye = view.location;
         cache.count = count;
@@ -1775,7 +1873,7 @@ namespace dx {
 
     void SceneRenderer::drawFog(const Batch& batch, const View& view, int32_t onlyNode)
     {
-        if (!view.fog || !batch.fogZone || volumetrics.empty() || batch.lightmapPage < 0) {
+        if (!view.visibility || !view.fog || !batch.fogZone || volumetrics.empty() || batch.lightmapPage < 0) {
             return;
         }
         bool started = false;
@@ -1819,9 +1917,25 @@ namespace dx {
         if (!info) {
             return;
         }
+        auto setupDetail = [&] {
+            device->setBlend(BlendMode::Modulated);
+            device->setFlags(SHADER_Detail);
+            device->setPan(0, 0);
+            device->setEye(view.location, forward);
+            device->bindTexture(info->id);
+            device->setPolygonOffset(true, -1.0f, -1.0f);
+        };
+        if (view.zoneOnly && onlyNode < 0 && (!batch.fogZone || volumetrics.empty())) {
+            const int32_t first = batch.detailPolys.front()[0];
+            const auto& last = batch.detailPolys.back();
+            setupDetail();
+            device->drawStatic(levelData.detailVao, first, last[0] + last[1] - first);
+            device->setPolygonOffset(false, 0.0f, 0.0f);
+            return;
+        }
         bool started = false;
         for (const auto& [first, count, surfIndex, node] : batch.detailPolys) {
-            if ((onlyNode >= 0 && node != onlyNode) || levelData.nodeStamp[static_cast<size_t>(node)] != visibleStamp) {
+            if ((onlyNode >= 0 && node != onlyNode) || (!view.zoneOnly && levelData.nodeStamp[static_cast<size_t>(node)] != visibleStamp)) {
                 continue;
             }
             if (batch.fogZone && view.fog && static_cast<size_t>(surfIndex) < levelData.fogFrame.size() && levelData.fogFrame[static_cast<size_t>(surfIndex)] == fogStamp && levelData.fogged[static_cast<size_t>(surfIndex)]) {
@@ -1838,12 +1952,7 @@ namespace dx {
                 continue;
             }
             if (!started) {
-                device->setBlend(BlendMode::Modulated);
-                device->setFlags(SHADER_Detail);
-                device->setPan(0, 0);
-                device->setEye(view.location, forward);
-                device->bindTexture(info->id);
-                device->setPolygonOffset(true, -1.0f, -1.0f);
+                setupDetail();
                 started = true;
             }
             device->drawStatic(levelData.detailVao, first, count);
@@ -2259,6 +2368,11 @@ namespace dx {
     {
         UModel* model = levelData.model;
         Vector location = actor::Location(actor);
+        currentDepth = (location - view.location).dot(view.axes.xAxis);
+        if (view.zoneOnly) {
+            currentOrder = 0;
+            return;
+        }
         currentOrder = fallbackOrder;
         int32_t index = 0;
         for (int guard = 0; model && guard < 10000 && static_cast<size_t>(index) < model->nodes.size(); guard++) {
@@ -2278,7 +2392,6 @@ namespace dx {
             }
             index = next;
         }
-        currentDistance = (actor::Location(actor) - view.location).size();
     }
 
     void SceneRenderer::queueTranslucent(uint32_t flags, uint32_t texture, const GroupExtra& extra, const std::vector<GLVertex>& vertices)
@@ -2288,55 +2401,77 @@ namespace dx {
         }
         TranslucentItem& item = translucentItems[translucentCount++];
         item.order = currentOrder;
-        item.distance = currentDistance;
+        item.depth = currentDepth;
         item.flags = flags;
         item.texture = texture;
         item.extra = extra;
         item.vertices.assign(vertices.begin(), vertices.end());
     }
 
-    void SceneRenderer::flushTranslucent(const View& view)
+    void SceneRenderer::flushTranslucent(const View& view, bool includeLevel)
     {
         applyView(view);
-        std::vector<size_t> order(translucentCount);
+        device->setScale(1, 1);
+        auto& draws = scratchTranslucentDraws;
+        draws.clear();
         for (size_t i = 0; i < translucentCount; i++) {
-            order[i] = i;
+            const TranslucentItem& item = translucentItems[i];
+            draws.push_back({ item.order, item.depth, nullptr, &item });
         }
-        std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) {
-            const TranslucentItem& first = translucentItems[a];
-            const TranslucentItem& second = translucentItems[b];
-            if (first.order != second.order) {
-                return first.order < second.order;
-            }
-            return first.distance > second.distance;
+        if (includeLevel && levelData.vao) {
+            collectTranslucentSurfaces(view, draws);
+        }
+        // A blended floor and the objects seen through it must share the same order.
+        std::stable_sort(draws.begin(), draws.end(), [](const TranslucentDraw& a, const TranslucentDraw& b) {
+            return a.order == b.order ? a.depth > b.depth : a.order < b.order;
         });
-        std::vector<TranslucentSurface>& surfaces = scratchTranslucentSurfaces;
-        size_t nextSurface = 0;
+
+        uint32_t actorVao = 0;
+        int32_t actorFirst = 0;
+#ifdef __EMSCRIPTEN__
+        if (translucentCount != 0) {
+            size_t count = 0;
+            for (size_t i = 0; i < translucentCount; i++) {
+                count += translucentItems[i].vertices.size();
+            }
+            scratchActorBatch.clear();
+            scratchActorBatch.reserve(count);
+            for (const TranslucentDraw& entry : draws) {
+                if (entry.actor) {
+                    const auto& vertices = entry.actor->vertices;
+                    scratchActorBatch.insert(scratchActorBatch.end(), vertices.begin(), vertices.end());
+                }
+            }
+            if (!scratchActorBatch.empty()) {
+                VertexRange range = device->uploadVertexBatch(scratchActorBatch);
+                actorVao = range.vao;
+                actorFirst = range.first;
+            }
+        }
+#endif
+
         uint32_t uploadedLights = ~0u;
-        auto drawSurfacesBefore = [&](int32_t limit) {
-            bool drew = false;
-            while (nextSurface < surfaces.size() && surfaces[nextSurface].order <= limit) {
-                const TranslucentSurface& surface = surfaces[nextSurface++];
-                drawBatch(*surface.batch, view, &surface.first, &surface.count, 1, surface.node, uploadedLights);
+        bool lastDrawWasLevel = false;
+        for (const TranslucentDraw& entry : draws) {
+            if (entry.batch) {
+                drawBatch(*entry.batch, view, &entry.first, &entry.count, 1, entry.node, uploadedLights);
+                lastDrawWasLevel = true;
+                continue;
+            }
+            if (lastDrawWasLevel) {
                 device->setPan(0, 0);
-                device->setScale(1, 1);
-                drew = true;
-            }
-            if (drew) {
                 device->setOcclusionSource(OcclusionSource::Mesh);
+                lastDrawWasLevel = false;
             }
-        };
-        for (size_t index : order) {
-            const TranslucentItem& item = translucentItems[index];
-            drawSurfacesBefore(item.order - 1);
-            drawGroup(item.flags, item.texture, item.extra, item.vertices);
-            if (item.extra.lightMask) {
+            const TranslucentItem& item = *entry.actor;
+            drawGroup(item.flags, item.texture, item.extra, item.vertices, actorVao, actorFirst);
+            actorFirst += static_cast<int32_t>(item.vertices.size());
+            if (item.extra.lightmap && item.extra.lightMask) {
                 uploadedLights = ~0u;
             }
         }
-        drawSurfacesBefore(std::numeric_limits<int32_t>::max());
-        surfaces.clear();
         translucentCount = 0;
+        device->setPan(0, 0);
         device->setBlend(BlendMode::Opaque);
     }
 
@@ -2345,16 +2480,23 @@ namespace dx {
         flushBatches(meshBatches);
     }
 
-    void SceneRenderer::drawGroup(uint32_t flags, uint32_t texture, const GroupExtra& extra, const std::vector<GLVertex>& vertices)
+    void SceneRenderer::drawGroup(uint32_t flags, uint32_t texture, const GroupExtra& extra, const std::vector<GLVertex>& vertices, uint32_t vao, int32_t first)
     {
         if (vertices.empty()) {
             return;
         }
+        auto draw = [&] {
+            if (vao) {
+                device->drawStatic(vao, first, static_cast<int32_t>(vertices.size()));
+            } else {
+                device->draw(vertices, Primitive::Triangles);
+            }
+        };
         if (!extra.lightmap || renderMode == RenderMode::Unlit) {
             applyBlend(flags, 0);
             device->setCulling(false);
             device->bindTexture(renderMode == RenderMode::LightingOnly ? device->whiteTexture() : texture);
-            device->draw(vertices, Primitive::Triangles);
+            draw();
             return;
         }
         int32_t shaderFlags = SHADER_Lightmap;
@@ -2377,11 +2519,11 @@ namespace dx {
             } else {
                 device->setCulling(false);
             }
-            device->draw(vertices, Primitive::Triangles);
+            draw();
             device->setBlend(BlendMode::Modulated);
             device->setFlags(shaderFlags);
             device->setTint(0.5f, 0.5f, 0.5f, 1);
-            device->draw(vertices, Primitive::Triangles);
+            draw();
             device->setTint(1, 1, 1, 1);
             return;
         }
@@ -2391,15 +2533,37 @@ namespace dx {
         } else {
             device->setCulling(false);
         }
-        device->draw(vertices, Primitive::Triangles);
+        draw();
     }
 
     void SceneRenderer::flushBatches(std::unordered_map<uint64_t, std::vector<GLVertex>>& batches)
     {
+#ifdef __EMSCRIPTEN__
+        size_t count = 0;
+        for (const auto& [key, vertices] : batches) {
+            count += vertices.size();
+        }
+        if (count != 0) {
+            scratchActorBatch.clear();
+            scratchActorBatch.reserve(count);
+            for (const auto& [key, vertices] : batches) {
+                scratchActorBatch.insert(scratchActorBatch.end(), vertices.begin(), vertices.end());
+            }
+            VertexRange range = device->uploadVertexBatch(scratchActorBatch);
+            for (auto& [key, vertices] : batches) {
+                if (!vertices.empty()) {
+                    drawGroup(meshBatchFlags[key], meshBatchTextures[key], meshBatchExtras[key], vertices, range.vao, range.first);
+                    range.first += static_cast<int32_t>(vertices.size());
+                    vertices.clear();
+                }
+            }
+        }
+#else
         for (auto& [key, vertices] : batches) {
             drawGroup(meshBatchFlags[key], meshBatchTextures[key], meshBatchExtras[key], vertices);
             vertices.clear();
         }
+#endif
         device->setBlend(BlendMode::Opaque);
     }
 
@@ -3004,6 +3168,11 @@ namespace dx {
                     group.key = key;
                     group.flags = flags & (PF_Translucent | PF_Modulated | PF_Masked | PF_SpecialLit);
                     group.texture = textureId;
+#ifdef __EMSCRIPTEN__
+                    if (info && info->procedural) {
+                        group.proceduralTexture = texture;
+                    }
+#endif
                     group.translucent = translucent;
                     group.lightmap = lightmapId;
                     group.cull = !(flags & PF_TwoSided);
@@ -3027,6 +3196,14 @@ namespace dx {
             }
         }
         for (EmittedGroup& group : cache.groups) {
+#ifdef __EMSCRIPTEN__
+            // Mover geometry can stay cached across procedural texture swaps.
+            if (group.proceduralTexture) {
+                const GLTextureInfo* info = device->texture(device->animated(group.proceduralTexture));
+                group.texture = info ? info->id : device->whiteTexture();
+                group.key = (group.key & 0xffffffffu) | (static_cast<uint64_t>(group.texture) << 32) | (1ull << 63);
+            }
+#endif
             group.lightMask = group.lightmap ? litMask(group.low, group.high, (group.flags & PF_SpecialLit) != 0) : 0;
         }
         appendGroups(cache.groups, brushBatches);
@@ -3441,9 +3618,11 @@ namespace dx {
                 if (itemZone != 0 && !(view.zoneMask & (1ull << (itemZone & 63)))) {
                     return;
                 }
-                float radius = actorRadius(item);
-                if (!inFrustum(view, actor::Location(item), radius) || !sphereReachesVisible(view, actor::Location(item), radius)) {
-                    return;
+                if (!view.zoneOnly) {
+                    float radius = actorRadius(item);
+                    if (!inFrustum(view, actor::Location(item), radius) || !sphereReachesVisible(view, actor::Location(item), radius)) {
+                        return;
+                    }
                 }
                 if (levelData.levelInfo) {
                     actor::LastRenderTime(item) = levelinfo::TimeSeconds(levelData.levelInfo);
@@ -3458,9 +3637,11 @@ namespace dx {
             if (zone != 0 && !(view.zoneMask & (1ull << (zone & 63)))) {
                 continue;
             }
-            float radius = actorRadius(actor);
-            if (!inFrustum(view, actor::Location(actor), radius) || !sphereReachesVisible(view, actor::Location(actor), radius)) {
-                continue;
+            if (!view.zoneOnly) {
+                float radius = actorRadius(actor);
+                if (!inFrustum(view, actor::Location(actor), radius) || !sphereReachesVisible(view, actor::Location(actor), radius)) {
+                    continue;
+                }
             }
             candidates.push_back(actor);
         }
@@ -3533,7 +3714,7 @@ namespace dx {
             }
         }
         view.fog = true;
-        if (!wireframe) {
+        if (!wireframe && (!view.zoneOnly || (view.zoneMask & levelData.visibilityZones))) {
             occludeView(view, nullptr);
         }
         if (levelData.hasBackdrop && !wireframe) {
@@ -3541,7 +3722,7 @@ namespace dx {
             device->setDepthWrite(true);
             device->clear(false, true, 1.0f);
         }
-        if (!levelData.mirrors.empty() && !wireframe) {
+        if (!levelData.mirrors.empty() && view.visibility) {
             drawMirrors(view, actors);
             device->setDepthWrite(true);
             device->clear(false, true, 1.0f);
@@ -3551,8 +3732,9 @@ namespace dx {
             drawWireframe(view, actors, viewActor);
         } else {
             device->beginOcclusion();
-            drawFrameContent(view, actors, viewActor, fullFrame);
+            drawFrameContent(view, actors, viewActor, fullFrame && !view.zoneOnly);
             drawCoronas(view, x, y, width, height);
+            device->flushCanvas();
         }
         if (renderMode == RenderMode::ZonePortal) {
             drawPortals(view);
@@ -3584,6 +3766,8 @@ namespace dx {
         device->setTint(1, 1, 1, 1);
         device->setDepthTest(true);
         device->setDepthFunc(DepthFunc::LessEqual);
+        currentOrder = 0;
+        currentDepth = (actor::Location(actor) - view.location).dot(view.axes.xAxis);
         drawActor(actor, view);
         flushMeshBatches();
         flushTranslucent(view);

@@ -78,6 +78,7 @@ namespace dx {
             std::vector<std::array<int32_t, 4>> detailPolys;
             std::vector<std::array<int32_t, 6>> surfPolys;
             std::vector<std::array<int32_t, 3>> nodePolys;
+            std::vector<Vector> translucentCenters;
             bool fogZone = false;
             int32_t first = 0;
             int32_t count = 0;
@@ -114,6 +115,7 @@ namespace dx {
         struct FogCache {
             bool valid = false;
             bool fogged = false;
+            bool zoneView = false;
             uint64_t signature = 0;
             Vector eye;
             Vector center;
@@ -128,6 +130,9 @@ namespace dx {
             uint32_t detailVao = 0;
             std::vector<Vector> detailPoints;
             std::vector<Batch> batches;
+            std::unordered_map<uint64_t, std::vector<size_t>> zoneBatches;
+            uint64_t visibilityZones = 0;
+            uint64_t mirrorZones = 0;
             bool hasBackdrop = false;
             uint32_t mirrorVao = 0;
             std::vector<MirrorSurface> mirrors;
@@ -156,14 +161,6 @@ namespace dx {
             uint32_t flatVaos[2] = {};
         };
 
-        struct TranslucentSurface {
-            int32_t order = 0;
-            const Batch* batch = nullptr;
-            int32_t first = 0;
-            int32_t count = 0;
-            int32_t node = -1;
-        };
-
         struct GroupExtra {
             uint32_t lightmap = 0;
             uint32_t lightMask = 0;
@@ -172,11 +169,21 @@ namespace dx {
 
         struct TranslucentItem {
             int32_t order = 0;
-            float distance = 0;
+            float depth = 0;
             uint32_t flags = 0;
             uint32_t texture = 0;
             GroupExtra extra;
             std::vector<GLVertex> vertices;
+        };
+
+        struct TranslucentDraw {
+            int32_t order = 0;
+            float depth = 0;
+            const Batch* batch = nullptr;
+            const TranslucentItem* actor = nullptr;
+            int32_t first = 0;
+            int32_t count = 0;
+            int32_t node = -1;
         };
 
         struct MeshTransform {
@@ -190,6 +197,9 @@ namespace dx {
             uint64_t key = 0;
             uint32_t flags = 0;
             uint32_t texture = 0;
+#ifdef __EMSCRIPTEN__
+            UTexture* proceduralTexture = nullptr;
+#endif
             bool translucent = false;
             uint32_t lightmap = 0;
             uint32_t lightMask = 0;
@@ -279,11 +289,14 @@ namespace dx {
             std::vector<Plane> cullPlanes;
             std::vector<Vector> portal;
             bool fog = false;
+            bool zoneOnly = false;
             std::shared_ptr<ViewVisibility> visibility;
         };
 
         void buildLevel(ULevel* level, const std::vector<UObject*>& actors);
-        void drawLevelGeometry(const View& view, bool translucentPass);
+        const std::vector<size_t>& batchesInZones(uint64_t zones);
+        void drawOpaqueLevelGeometry(const View& view);
+        void collectTranslucentSurfaces(const View& view, std::vector<TranslucentDraw>& draws);
         void drawDetail(const Batch& batch, const View& view, int32_t onlyNode);
         void drawBatch(const Batch& batch, const View& view, const int32_t* firsts, const int32_t* counts, int32_t ranges, int32_t onlyNode, uint32_t& uploadedLights);
         void occludeView(View& view, const std::vector<ScreenSpan>* open);
@@ -308,8 +321,8 @@ namespace dx {
         void drawBrush(UObject* actor, const View& view);
         void drawMoverSurfaces(UObject* actor, UModel* brush);
         void flushMeshBatches();
-        void flushTranslucent(const View& view);
-        void drawGroup(uint32_t flags, uint32_t texture, const GroupExtra& extra, const std::vector<GLVertex>& vertices);
+        void flushTranslucent(const View& view, bool includeLevel = false);
+        void drawGroup(uint32_t flags, uint32_t texture, const GroupExtra& extra, const std::vector<GLVertex>& vertices, uint32_t vao = 0, int32_t first = 0);
         void setActorOrder(UObject* actor, const View& view);
         void queueTranslucent(uint32_t flags, uint32_t texture, const GroupExtra& extra, const std::vector<GLVertex>& vertices);
         void flushBatches(std::unordered_map<uint64_t, std::vector<GLVertex>>& batches);
@@ -383,6 +396,9 @@ namespace dx {
         int32_t lightFrameCount = 0;
         double lastFrameTime = -1;
         std::vector<Vector> scratchPose;
+#ifdef __EMSCRIPTEN__
+        std::vector<GLVertex> scratchActorBatch;
+#endif
         std::vector<Vector> scratchNormals;
         std::vector<Vector> scratchWorld;
         std::vector<Vector> scratchWorldNormals;
@@ -418,12 +434,12 @@ namespace dx {
         std::unordered_map<uint64_t, std::vector<GLVertex>> brushBatches;
         std::vector<TranslucentItem> translucentItems;
         size_t translucentCount = 0;
-        std::vector<TranslucentSurface> scratchTranslucentSurfaces;
+        std::vector<TranslucentDraw> scratchTranslucentDraws;
         std::vector<int32_t> nodeOrder;
         std::vector<int32_t> leafOrder;
         int32_t currentOrder = 0;
         int32_t fallbackOrder = 0;
-        float currentDistance = 0;
+        float currentDepth = 0;
         std::unordered_map<uint64_t, uint32_t> meshBatchFlags;
         std::unordered_map<uint64_t, uint32_t> meshBatchTextures;
         std::unordered_map<uint64_t, GroupExtra> meshBatchExtras;

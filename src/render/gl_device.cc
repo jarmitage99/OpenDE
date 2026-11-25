@@ -285,8 +285,25 @@ namespace dx {
 
     void GLRenderDevice::drawRange(int32_t first, int32_t count)
     {
-        shader->drawRange(first, count);
+        shader->drawRange(first, count, GL_TRIANGLES);
     }
+
+#ifdef __EMSCRIPTEN__
+    void GLRenderDevice::beginVertexFrame()
+    {
+        shader->beginVertexFrame();
+    }
+
+    VertexRange GLRenderDevice::uploadVertexBatch(const std::vector<GLVertex>& vertices)
+    {
+        return shader->uploadVertexBatch(vertices);
+    }
+
+    void GLRenderDevice::endVertexFrame()
+    {
+        shader->endVertexFrame();
+    }
+#endif
 
     uint32_t GLRenderDevice::createStatic(const std::vector<GLVertex>& vertices)
     {
