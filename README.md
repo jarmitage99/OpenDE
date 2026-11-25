@@ -3,7 +3,9 @@
 An open-source reimplementation of the Deus Ex engine and UnrealEd. It runs
 the original game's UnrealScript bytecode from the shipped `.u` packages on a
 new C++ engine built on SDL2 and OpenGL 3.3. 
-This [OpenDE-Web](https://leweyg.github.io/OpenDE-Web/) code [fork](https://github.com/leweyg/OpenDE-Web) optimizes the web rendering
+
+
+This [OpenDE-Web](https://leweyg.github.io/OpenDE-Web/) code [fork](https://github.com/leweyg/OpenDE-Web) (with PRs to merge back [rendering-optimizations](https://github.com/jarmitage99/OpenDE/pull/20) and [web-host-tuning](https://github.com/jarmitage99/OpenDE/pull/21) ) optimizes the web rendering
  and controls (for smoother frame-rate and modern laptop touchpad+keyboard, and phone/tablet single/dual touch-sticks controls, etc.), and was adapted by [Lewey Geselowitz](https://lewcid.com/lg/aboutme.html) based on the core [OpenDE](https://github.com/jarmitage99/OpenDE) project.
 
 The original game data is required and is not included.
