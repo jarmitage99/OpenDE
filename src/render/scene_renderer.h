@@ -78,7 +78,6 @@ namespace dx {
             std::vector<std::array<int32_t, 4>> detailPolys;
             std::vector<std::array<int32_t, 6>> surfPolys;
             std::vector<std::array<int32_t, 3>> nodePolys;
-            std::vector<Vector> translucentCenters;
             bool fogZone = false;
             int32_t first = 0;
             int32_t count = 0;
@@ -115,7 +114,6 @@ namespace dx {
         struct FogCache {
             bool valid = false;
             bool fogged = false;
-            bool zoneView = false;
             uint64_t signature = 0;
             Vector eye;
             Vector center;
@@ -130,9 +128,6 @@ namespace dx {
             uint32_t detailVao = 0;
             std::vector<Vector> detailPoints;
             std::vector<Batch> batches;
-            std::unordered_map<uint64_t, std::vector<size_t>> zoneBatches;
-            uint64_t visibilityZones = 0;
-            uint64_t mirrorZones = 0;
             bool hasBackdrop = false;
             uint32_t mirrorVao = 0;
             std::vector<MirrorSurface> mirrors;
@@ -289,12 +284,10 @@ namespace dx {
             std::vector<Plane> cullPlanes;
             std::vector<Vector> portal;
             bool fog = false;
-            bool zoneOnly = false;
             std::shared_ptr<ViewVisibility> visibility;
         };
 
         void buildLevel(ULevel* level, const std::vector<UObject*>& actors);
-        const std::vector<size_t>& batchesInZones(uint64_t zones);
         void drawOpaqueLevelGeometry(const View& view);
         void collectTranslucentSurfaces(const View& view, std::vector<TranslucentDraw>& draws);
         void drawDetail(const Batch& batch, const View& view, int32_t onlyNode);

@@ -685,10 +685,12 @@ namespace {
             dx::deusex::insertMenuButton(settings, 5, "Extra Graphics", screen);
         }
 
+        // Browser builds disable networking and do not need the multiplayer bots menu.
 #ifdef DX_NETWORKING
         void addBotsChoice()
         {
             dx::UClass* serverMode = dx::objects::findClass("DeusEx.MenuChoice_ServerMode");
+            // Demo game data may omit multiplayer menu classes.
             if (!serverMode) {
                 return;
             }

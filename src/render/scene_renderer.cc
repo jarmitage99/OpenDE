@@ -521,8 +521,6 @@ namespace dx {
         if (!model || model->nodes.empty()) {
             return;
         }
-        // Overlapping mirrors need the original front-to-back occluders.
-        const bool specialOnly = view.zoneOnly && !(view.zoneMask & levelData.mirrorZones);
         if (open) {
             spans.reset(viewportWidth, viewportHeight, *open);
         } else {
@@ -574,9 +572,6 @@ namespace dx {
                     return false;
                 }
             }
-            if (specialOnly) {
-                return true;
-            }
             float left = std::numeric_limits<float>::max();
             float right = std::numeric_limits<float>::lowest();
             float top = std::numeric_limits<float>::max();
@@ -617,28 +612,17 @@ namespace dx {
                 return;
             }
             bool drawn = false;
-            bool fog = false;
             for (int32_t e = levelData.nodeEmitStart[static_cast<size_t>(index)]; e < levelData.nodeEmitStart[static_cast<size_t>(index) + 1]; e++) {
                 const Batch& batch = levelData.batches[static_cast<size_t>(levelData.nodeEmits[static_cast<size_t>(e)].batch)];
                 if (view.zoneMask & (1ull << (batch.zone & 63))) {
                     drawn = true;
-                    fog = fog || batch.fogZone;
-                    if (!specialOnly || fog) {
-                        break;
-                    }
+                    break;
                 }
             }
             if (!drawn) {
                 return;
             }
             bool backdrop = (flags & PF_FakeBackdrop) && levelData.hasBackdrop;
-            if (specialOnly && !backdrop) {
-                if (fog) {
-                    visibility->nodes.push_back(index);
-                    visibility->nodeSequence.push_back(sequence++);
-                }
-                return;
-            }
             Vector* input = clipA;
             Vector* output = clipB;
             int32_t count = std::min<int32_t>(node.numVertices, 32);
@@ -683,7 +667,7 @@ namespace dx {
                 visibility->backdropSpans.insert(visibility->backdropSpans.end(), scratchSpans.begin(), scratchSpans.end());
             }
             bool occluder = mirror >= 0 || backdrop || !(flags & (PF_Masked | PF_Translucent | PF_Modulated | PF_Invisible | PF_Portal));
-            if (!specialOnly && occluder && (side > 0 || twoSided)) {
+            if (occluder && (side > 0 || twoSided)) {
                 pendingCounts.push_back(count);
                 pendingPoints.insert(pendingPoints.end(), screen, screen + count);
             }
@@ -768,9 +752,6 @@ namespace dx {
         for (int32_t node : visibility.nodes) {
             levelData.nodeStamp[static_cast<size_t>(node)] = visibleStamp;
             levelData.surfStamp[static_cast<size_t>(model->nodes[static_cast<size_t>(node)].surf)] = visibleStamp;
-            if (view.zoneOnly) {
-                continue;
-            }
             for (int32_t e = levelData.nodeEmitStart[static_cast<size_t>(node)]; e < levelData.nodeEmitStart[static_cast<size_t>(node) + 1]; e++) {
                 const NodeEmit& emit = levelData.nodeEmits[static_cast<size_t>(e)];
                 std::vector<std::array<int32_t, 3>>& ranges = levelData.batchRanges[static_cast<size_t>(emit.batch)];
@@ -1119,22 +1100,6 @@ namespace dx {
             }
             batch.first = static_cast<int32_t>(all.size());
             batch.count = static_cast<int32_t>(vertices.size());
-            if (isTranslucentFlags(batch.polyFlags)) {
-                for (const auto& range : nodeRanges[key]) {
-                    Vector center {};
-                    for (int32_t i = range[0]; i < range[0] + range[1]; i++) {
-                        const GLVertex& vertex = vertices[static_cast<size_t>(i)];
-                        center = center + Vector { vertex.x, vertex.y, vertex.z };
-                    }
-                    batch.translucentCenters.push_back(center / static_cast<float>(range[1]));
-                }
-            }
-            if (batch.fogZone || (batch.polyFlags & (PF_FakeBackdrop | PF_Mirrored))) {
-                levelData.visibilityZones |= 1ull << (batch.zone & 63);
-            }
-            if (batch.polyFlags & PF_Mirrored) {
-                levelData.mirrorZones |= 1ull << (batch.zone & 63);
-            }
             batch.boundsMin = { vertices[0].x, vertices[0].y, vertices[0].z };
             batch.boundsMax = batch.boundsMin;
             for (const GLVertex& vertex : vertices) {
@@ -1257,19 +1222,6 @@ namespace dx {
         }
     }
 
-    const std::vector<size_t>& SceneRenderer::batchesInZones(uint64_t zones)
-    {
-        auto [entry, inserted] = levelData.zoneBatches.try_emplace(zones);
-        if (inserted) {
-            for (size_t i = 0; i < levelData.batches.size(); i++) {
-                if (zones & (1ull << (levelData.batches[i].zone & 63))) {
-                    entry->second.push_back(i);
-                }
-            }
-        }
-        return entry->second;
-    }
-
     void SceneRenderer::applyBlend(uint32_t polyFlags, int32_t extraFlags)
     {
         int32_t flags = SHADER_Textured | extraFlags;
@@ -1302,28 +1254,14 @@ namespace dx {
                 ((batch.polyFlags & PF_FakeBackdrop) && levelData.hasBackdrop)) {
                 return;
             }
-            if (view.zoneOnly) {
-                for (size_t i = 0; i < batch.nodePolys.size(); i++) {
-                    const auto& [first, count, node] = batch.nodePolys[i];
-                    float depth = (batch.translucentCenters[i] - view.location).dot(view.axes.xAxis);
-                    draws.push_back({ 0, depth, &batch, nullptr, first, count, node });
-                }
-                return;
-            }
             auto& ranges = levelData.batchRanges[index];
             std::sort(ranges.begin(), ranges.end());
             for (const auto& [first, count, node] : ranges) {
                 draws.push_back({ nodeOrder[static_cast<size_t>(node)], 0, &batch, nullptr, first, count, node });
             }
         };
-        if (view.zoneOnly) {
-            for (size_t index : batchesInZones(view.zoneMask)) {
-                collectBatch(index);
-            }
-        } else {
-            for (size_t index = 0; index < levelData.batches.size(); index++) {
-                collectBatch(index);
-            }
+        for (size_t index = 0; index < levelData.batches.size(); index++) {
+            collectBatch(index);
         }
     }
 
@@ -1340,42 +1278,11 @@ namespace dx {
         device->setDepthFunc(DepthFunc::LessEqual);
         device->setFrontFace(!view.mirrored);
         device->bindStatic(levelData.vao);
-        if (!view.zoneOnly || view.visibility) {
-            gatherVisible(view);
-        }
+        gatherVisible(view);
         lightmaps.animate(levelData.model, static_cast<float>(time), static_cast<uint64_t>(lightFrameCount), [&](size_t surf, uint64_t zones) {
-            return (view.zoneMask & zones) && (view.zoneOnly || levelData.surfStamp[surf] == visibleStamp);
+            return (view.zoneMask & zones) && levelData.surfStamp[surf] == visibleStamp;
         });
-        bool skyActive = levelData.hasBackdrop;
         bool mirrorsActive = view.recursion < MaxFrameRecursion - 1;
-        if (view.zoneOnly) {
-            const auto& batches = batchesInZones(view.zoneMask);
-            // Lay down the sky and mirror depth masks before any world color.
-            for (size_t index : batches) {
-                const Batch& batch = levelData.batches[index];
-                if (mirrorsActive && (batch.polyFlags & PF_Mirrored)) {
-                    device->setBlend(BlendMode::Opaque);
-                    device->setFlags(0);
-                    device->setCulling(!(batch.polyFlags & PF_TwoSided));
-                    device->setColorWrite(false);
-                    device->drawStatic(levelData.vao, batch.first, batch.count);
-                    device->setColorWrite(true);
-                } else if (skyActive && (batch.polyFlags & PF_FakeBackdrop) && !isTranslucentFlags(batch.polyFlags)) {
-                    drawBatch(batch, view, &batch.first, &batch.count, 1, -1, uploadedLights);
-                }
-            }
-            for (size_t index : batches) {
-                const Batch& batch = levelData.batches[index];
-                if (isTranslucentFlags(batch.polyFlags) || (mirrorsActive && (batch.polyFlags & PF_Mirrored)) ||
-                    (skyActive && (batch.polyFlags & PF_FakeBackdrop))) {
-                    continue;
-                }
-                drawBatch(batch, view, &batch.first, &batch.count, 1, -1, uploadedLights);
-            }
-            device->setPan(0, 0);
-            device->setScale(1, 1);
-            return;
-        }
         auto collectRanges = [&](int32_t index) {
             std::vector<std::array<int32_t, 3>>& ranges = levelData.batchRanges[static_cast<size_t>(index)];
             std::sort(ranges.begin(), ranges.end());
@@ -1790,24 +1697,18 @@ namespace dx {
         levelData.fogFrame[index] = fogStamp;
         levelData.fogged[index] = 0;
         FogCache& cache = levelData.fogCache[index];
-        if (view.zoneOnly && cache.valid && cache.zoneView &&
-            static_cast<uint64_t>(lightFrameCount) % DynamicTextureUpdatePeriod != index % DynamicTextureUpdatePeriod) {
-            levelData.fogged[index] = cache.fogged ? 1 : 0;
-            return cache.fogged;
-        }
         int32_t count = 0;
         for (int32_t node : levelData.surfNodes[index]) {
             if (levelData.nodeStamp[static_cast<size_t>(node)] == visibleStamp) {
                 count = std::max(count, levelData.nodeVolumetrics[static_cast<size_t>(node)]);
             }
         }
-        if (cache.valid && cache.zoneView == view.zoneOnly && cache.signature == volumetricSignature && cache.count == count && sameVector(cache.eye, view.location)) {
+        if (cache.valid && cache.signature == volumetricSignature && cache.count == count && sameVector(cache.eye, view.location)) {
             levelData.fogged[index] = cache.fogged ? 1 : 0;
             return cache.fogged;
         }
         cache.valid = true;
         cache.fogged = false;
-        cache.zoneView = view.zoneOnly;
         cache.signature = volumetricSignature;
         cache.eye = view.location;
         cache.count = count;
@@ -1925,17 +1826,9 @@ namespace dx {
             device->bindTexture(info->id);
             device->setPolygonOffset(true, -1.0f, -1.0f);
         };
-        if (view.zoneOnly && onlyNode < 0 && (!batch.fogZone || volumetrics.empty())) {
-            const int32_t first = batch.detailPolys.front()[0];
-            const auto& last = batch.detailPolys.back();
-            setupDetail();
-            device->drawStatic(levelData.detailVao, first, last[0] + last[1] - first);
-            device->setPolygonOffset(false, 0.0f, 0.0f);
-            return;
-        }
         bool started = false;
         for (const auto& [first, count, surfIndex, node] : batch.detailPolys) {
-            if ((onlyNode >= 0 && node != onlyNode) || (!view.zoneOnly && levelData.nodeStamp[static_cast<size_t>(node)] != visibleStamp)) {
+            if ((onlyNode >= 0 && node != onlyNode) || levelData.nodeStamp[static_cast<size_t>(node)] != visibleStamp) {
                 continue;
             }
             if (batch.fogZone && view.fog && static_cast<size_t>(surfIndex) < levelData.fogFrame.size() && levelData.fogFrame[static_cast<size_t>(surfIndex)] == fogStamp && levelData.fogged[static_cast<size_t>(surfIndex)]) {
@@ -2369,10 +2262,6 @@ namespace dx {
         UModel* model = levelData.model;
         Vector location = actor::Location(actor);
         currentDepth = (location - view.location).dot(view.axes.xAxis);
-        if (view.zoneOnly) {
-            currentOrder = 0;
-            return;
-        }
         currentOrder = fallbackOrder;
         int32_t index = 0;
         for (int guard = 0; model && guard < 10000 && static_cast<size_t>(index) < model->nodes.size(); guard++) {
@@ -3618,11 +3507,9 @@ namespace dx {
                 if (itemZone != 0 && !(view.zoneMask & (1ull << (itemZone & 63)))) {
                     return;
                 }
-                if (!view.zoneOnly) {
-                    float radius = actorRadius(item);
-                    if (!inFrustum(view, actor::Location(item), radius) || !sphereReachesVisible(view, actor::Location(item), radius)) {
-                        return;
-                    }
+                float radius = actorRadius(item);
+                if (!inFrustum(view, actor::Location(item), radius) || !sphereReachesVisible(view, actor::Location(item), radius)) {
+                    return;
                 }
                 if (levelData.levelInfo) {
                     actor::LastRenderTime(item) = levelinfo::TimeSeconds(levelData.levelInfo);
@@ -3637,11 +3524,9 @@ namespace dx {
             if (zone != 0 && !(view.zoneMask & (1ull << (zone & 63)))) {
                 continue;
             }
-            if (!view.zoneOnly) {
-                float radius = actorRadius(actor);
-                if (!inFrustum(view, actor::Location(actor), radius) || !sphereReachesVisible(view, actor::Location(actor), radius)) {
-                    continue;
-                }
+            float radius = actorRadius(actor);
+            if (!inFrustum(view, actor::Location(actor), radius) || !sphereReachesVisible(view, actor::Location(actor), radius)) {
+                continue;
             }
             candidates.push_back(actor);
         }
@@ -3714,7 +3599,7 @@ namespace dx {
             }
         }
         view.fog = true;
-        if (!wireframe && (!view.zoneOnly || (view.zoneMask & levelData.visibilityZones))) {
+        if (!wireframe) {
             occludeView(view, nullptr);
         }
         if (levelData.hasBackdrop && !wireframe) {
@@ -3732,7 +3617,7 @@ namespace dx {
             drawWireframe(view, actors, viewActor);
         } else {
             device->beginOcclusion();
-            drawFrameContent(view, actors, viewActor, fullFrame && !view.zoneOnly);
+            drawFrameContent(view, actors, viewActor, fullFrame);
             drawCoronas(view, x, y, width, height);
             device->flushCanvas();
         }

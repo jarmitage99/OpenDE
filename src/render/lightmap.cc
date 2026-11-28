@@ -473,6 +473,7 @@ namespace dx {
     void LightmapAtlas::animate(UModel* model, float time, uint64_t frame, const std::function<bool(size_t surf, uint64_t zones)>& visible)
     {
         std::vector<uint8_t> bytes;
+        // The period is 1 on native builds, so every visible entry is updated.
         for (size_t i = static_cast<size_t>(frame % DynamicTextureUpdatePeriod); i < animated.size(); i += DynamicTextureUpdatePeriod) {
             Animated& entry = animated[i];
             if (entry.frame == frame || !visible(entry.surf, entry.zones)) {

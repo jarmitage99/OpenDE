@@ -2,10 +2,6 @@
 
 #include <glad/gl.h>
 
-#ifdef __EMSCRIPTEN__
-#include <emscripten.h>
-#endif
-
 #include <algorithm>
 #include <cstddef>
 #include <cstring>
@@ -15,13 +11,6 @@
 
 namespace dx {
     namespace {
-#ifdef __EMSCRIPTEN__
-        // Use the WebGL 2 heap-range overload to avoid making a JS view per upload.
-        EM_JS(void, uploadVertexBytes, (GLenum target, GLintptr offset, GLsizeiptr size, const void* data), {
-            GLctx.bufferSubData(target, offset >>> 0, HEAPU8, data >>> 0, size >>> 0);
-        });
-#endif
-
         const char* vertexSource = R"(#version 330 core
 layout(location = 0) in vec3 aPosition;
 layout(location = 1) in vec2 aUV;
@@ -893,7 +882,8 @@ void main()
             glBindBuffer(GL_ARRAY_BUFFER, available->buffer);
         }
         VertexPage& page = *available;
-        uploadVertexBytes(GL_ARRAY_BUFFER, static_cast<GLintptr>(page.offset), static_cast<GLsizeiptr>(bytes), vertices.data());
+        // Let Emscripten select the upload overload for the supported browsers.
+        glBufferSubData(GL_ARRAY_BUFFER, static_cast<GLintptr>(page.offset), static_cast<GLsizeiptr>(bytes), vertices.data());
 
         VertexRange range { page.vao, static_cast<int32_t>(page.offset / sizeof(GLVertex)) };
         page.offset += bytes;

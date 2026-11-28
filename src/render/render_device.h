@@ -9,6 +9,7 @@
 namespace dx {
     class UTexture;
 
+    // Spread dynamic texture work across browser frames; native updates every frame.
 #ifdef __EMSCRIPTEN__
     constexpr uint32_t DynamicTextureUpdatePeriod = 10;
 #else
